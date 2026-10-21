@@ -125,7 +125,36 @@ admin PUT, задав проверенную безопасную точку, з
 activation по PUT или PATCH при оставшемся marker запрещена. Повторный seed не продлевает
 сезон; даты сезона после его окончания оператор меняет через БД до следующего этапа продукта.
 
-## Запуск трёх процессов
+## Локальный запуск
+
+После установки зависимостей и заполнения корневого `.env` рекомендуемый запуск:
+
+```bash
+make dev
+```
+
+Команда проверяет `.env`, поднимает PostgreSQL, применяет migrations, выполняет
+idempotent seed и запускает backend, bot и Mini App параллельно в foreground.
+`Ctrl+C` завершает процессы этого запуска вместе с reload/npm workers; если один
+сервис завершился, остальные также останавливаются. PostgreSQL остаётся работать.
+Перед запуском остановите отдельные экземпляры этих сервисов на портах 8000/5173
+и другой polling-процесс того же бота. Переустановка зависимостей не выполняется.
+
+```bash
+make help     # Все доступные команды
+make tunnel   # Отдельный временный Cloudflare Quick Tunnel к localhost:5173
+make stop     # Остановить PostgreSQL через docker compose down
+```
+
+`make tunnel` требует установленный `cloudflared` (`brew install cloudflared`).
+Tunnel не запускается внутри `make dev`. Его HTTPS URL нужно самостоятельно
+записать в `TELEGRAM_WEBAPP_URL`, затем перезапустить `make dev`, сохранив tunnel
+работающим. `VITE_API_BASE_URL` оставьте пустым для Vite `/api` proxy.
+`make test` подготавливает отдельную test DB через общий guard и запускает backend,
+bot и frontend suites; PostgreSQL должен быть запущен (`make db`). Browser smoke
+запускается отдельно, как описано ниже. `make lint` проверяет Ruff и TypeScript.
+
+### Ручные команды для troubleshooting/reference
 
 Backend, первый терминал:
 
