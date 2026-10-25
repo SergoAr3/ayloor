@@ -1,55 +1,62 @@
 # AYLOOR Project Instructions
 
-## Product
+## Mission
 
 AYLOOR is a multiplayer real-world game.
 
-First launch market:
-Yerevan, Armenia.
-
 Public positioning:
 
-AYLOOR
-Play the real world.
+**AYLOOR**
+**Play the real world.**
+
+First launch market: Yerevan, Armenia.
 
 First season:
 
-AYLOOR YEREVAN — SEASON ZERO
-The city is your game.
+**AYLOOR YEREVAN — SEASON ZERO**\
+**The city is your game.**
 
-The core MVP flow is:
+Current goal: validate one complete multiplayer real-world gameplay loop:
 
-Telegram
-→ Mini App
-→ Create Team
-→ Invite Friend
-→ Team becomes active
-→ Start Quest
-→ GPS Check-in
-→ Backend verification
-→ XP
-→ Leaderboard
+Telegram → Mini App → Create Team → Invite Friend → Team becomes active → Start Quest → GPS Check-in → Backend verification → XP → Leaderboard
 
-## Development philosophy
+Do not optimize for a hypothetical global platform before this loop works well in real use.
 
-This project is being built by one developer.
+---
 
-Always prefer simple, maintainable solutions.
+## Engineering principles
 
-Do not overengineer.
+This project is built and maintained by one developer.
 
-Do not add infrastructure or abstractions unless they are required by the current task.
+Prefer solutions that are:
 
-Prefer:
+- simple
+- explicit
+- typed
+- easy to debug
+- easy to remove or change
+- testable
+- production-reasonable
 
-- simple code
-- explicit code
-- typed code
-- small modules
-- tests for important business logic
-- production-reasonable defaults
+Avoid unnecessary abstraction and architecture for hypothetical future scale. Prefer obvious code; a small amount of duplication is better than premature abstraction.
 
-Avoid premature scalability work.
+Preserve existing conventions unless a concrete reason warrants change.
+
+---
+
+## Source of truth
+
+Do not treat this file as complete product or implementation documentation.
+
+Before a non-trivial change, inspect relevant code, tests and documentation: `README.md`, `docs/DECISIONS_V01.md`, `docs/MVP_V01.md` and feature-specific documents under `docs/`.
+
+Check both code and documentation for freshness.
+
+Do not load or rewrite unrelated documentation.
+
+Identify conflicts with documented decisions before changing behavior.
+
+---
 
 ## Stack
 
@@ -79,85 +86,108 @@ Infrastructure:
 - Docker
 - Docker Compose
 
-## Do not introduce unless explicitly requested
-
-Do NOT add:
-
-- Redis
-- Celery
-- Kafka
-- Kubernetes
-- Terraform
-- GraphQL
-- microservices
-- AI/LLM
-- vector databases
-- complex event systems
+---
 
 ## Architecture
 
-Use a monorepo.
+AYLOOR is a monorepo.
 
-Expected structure:
+Main areas:
 
+```text
 ayloor/
   backend/
   bot/
   miniapp/
+  docs/
+  scripts/
   docker-compose.yml
+  Makefile
   .env.example
   README.md
   AGENTS.md
+```
 
-Backend should remain a modular monolith.
+The backend is a modular monolith. The Telegram bot handles entry/handoff; the Mini App handles gameplay UI.
 
-Do not create generic repository/service abstractions unless they actually simplify the current code.
+The backend remains authoritative for authentication, game rules, quest completion and XP.
 
-## Database
+Add repository, service, event or domain abstraction layers only when they simplify the current task.
 
-Use:
+Extend the existing architecture. Unless explicitly required, do not add Redis, Celery, Kafka, Kubernetes, Terraform, GraphQL, microservices, AI/LLM, vector databases or complex event systems.
 
-- PostgreSQL
+Avoid dependencies when the existing stack suffices.
+
+---
+
+## Local runtime safety
+
+Before starting local services, inspect what is already running. Reuse existing healthy services when possible.
+
+Do not start duplicate backend/uvicorn, Telegram bot, Vite, cloudflared, `make dev` or `scripts/dev.py` instances. Only one Telegram polling bot instance may run.
+
+---
+
+## Database invariants
+
+Use PostgreSQL.
+
+Prefer:
+
 - UUID internal primary keys
 - timezone-aware UTC timestamps
 - explicit foreign keys
-- useful constraints
-- database transactions for atomic business operations
+- useful database constraints
+- transactions for atomic business operations
+- database-level uniqueness where concurrency matters
 
-XP must use an append-style ScoreEvent ledger as the source of truth.
+XP uses the append-style `ScoreEvent` ledger as the source of truth.
 
-Do not rely only on a mutable `team.xp` field.
+Do not replace it with a mutable `team.xp` source of truth.
 
-## Security
+Operations that change multiple pieces of gameplay state must remain atomic.
 
-Never trust Telegram user IDs supplied directly by the frontend.
+---
 
-Telegram Mini App authentication must validate raw Telegram initData server-side.
+## Security invariants
 
-Never expose secrets to the frontend.
+Never trust Telegram user IDs supplied directly by frontend code.
 
-GPS quest completion must always be validated on the backend.
+Telegram Mini App authentication must validate raw Telegram `initData` server-side.
 
-Never let frontend code decide whether a quest is completed.
+Never expose secrets to frontend code.
 
-XP completion must be idempotent.
+GPS quest completion must always be validated by the backend.
 
-A repeated or concurrent check-in must not award XP twice.
+Frontend code must never be authoritative for whether a quest was completed.
 
-## Product rules
+XP completion must remain idempotent.
+
+Repeated or concurrent check-ins must never award completion XP twice.
+
+Development helpers must not weaken production behavior.
+
+Do not remove an existing backend validation merely because the frontend already performs the same check.
+
+---
+
+## Product invariants
 
 A team requires at least 2 members to become active.
 
-MVP team size:
-2–5 people.
+MVP team size is 2–5 people.
 
-Location is requested only when the user explicitly performs a check-in.
+Location is requested only after explicit user action.
 
-Do not implement continuous/background location tracking.
+Do not implement continuous or background location tracking.
+
+The current vertical slice takes priority over future feature breadth.
+
+---
 
 ## Quest verification
 
-Future quest verification levels:
+Future verification levels may include:
 
 - SYSTEM
 - MODERATED
@@ -166,11 +196,15 @@ Future quest verification levels:
 
 Only objectively verifiable quests should provide significant competitive leaderboard XP.
 
+Do not implement future verification systems unless required by the current task.
+
+---
+
 ## Safety
 
-Do not design gameplay that rewards dangerous speed.
+Gameplay must not reward dangerous speed.
 
-Do not encourage:
+Do not design mechanics that encourage:
 
 - unsafe road crossing
 - trespassing
@@ -178,11 +212,95 @@ Do not encourage:
 - dangerous interaction with strangers
 - unnecessary photographing of strangers
 
-## Testing
+Safety constraints are product requirements, not optional UX recommendations.
 
-Important business logic should have tests.
+---
 
-Especially test:
+## Task classification
+
+Use the smallest process appropriate for the task.
+
+### Small task
+
+Examples: localized CSS or copy changes, an obvious bug, a narrow test update or a refactor within one area.
+
+Inspect relevant code, make the change, run focused verification and review the diff. Do not create a plan file.
+
+### Medium task
+
+Examples: behavior spanning several files, an API + UI adjustment, a new business rule or a meaningful state-flow change requiring tests.
+
+After inspection, write a short in-context implementation plan, including affected invariants and likely regressions. A plan file is usually unnecessary. Follow the implementation workflow below.
+
+### Large task
+
+Examples: a feature spanning frontend and backend, schema/migration or authentication/security changes, significant quest lifecycle or architecture changes, or several independent investigation tracks.
+
+Create or update a task plan in `plans/active/`, using `plans/_TEMPLATE.md`. Capture the goal, scope, current behavior, constraints/invariants, implementation areas, acceptance criteria, verification and important decisions.
+
+The plan is living task state, not a chronological log. Keep it concise and current; update Investigation, Decisions and Verification as work progresses. Do not store secrets, local PIDs, temporary paths or screenshot inventories.
+
+After completion, move it to `plans/completed/` only if useful as durable project history.
+
+---
+
+## Lead agent responsibility
+
+The primary agent owns the task from beginning to end.
+
+The lead owns outcome and code understanding, delegation, implementation decisions, invariants, resolving conflicting findings, final diff review, verification and reporting.
+
+Subagents provide evidence and work products; the lead remains responsible for the result.
+
+---
+
+## Subagent policy
+
+Use subagents only when they can perform meaningful independent work.
+
+Good uses include investigating unfamiliar behavior or tests, reviewing implementation/security/concurrency, independently validating frontend behavior or the final diff, and implementing clearly separated areas in isolated worktrees.
+
+Do not create subagents merely to simulate a large team or delegate a small sequential task one agent can solve more efficiently.
+
+Prefer roughly 2–3 useful parallel tracks over many tiny agents.
+
+Give each subagent a narrow objective and expected output: relevant files, behavior, constraints, risks, recommendations and missing test coverage. The lead must independently evaluate recommendations before integrating them.
+
+---
+
+## Parallel implementation
+
+Parallel code editing is appropriate only when changes are genuinely separable.
+
+Prefer separate Git branches/worktrees when multiple agents implement in parallel.
+
+Avoid having multiple agents simultaneously modify the same files.
+
+If several changes touch a shared contract, schema, state model or central component, establish that contract first before parallelizing implementation.
+
+The lead performs final integration and conflict resolution.
+
+---
+
+## Implementation workflow
+
+For non-trivial tasks:
+
+1. Inspect current behavior, relevant code, tests and documentation.
+2. Identify affected product, security, database and concurrency invariants; plan according to task size.
+3. Implement the smallest complete solution and test changed important behavior.
+4. Run relevant checks, review the final diff and fix failures or regressions.
+5. Report changes, verification and remaining limitations.
+
+Do not stop after scaffolding when a working end-to-end feature is requested.
+
+---
+
+## Testing expectations
+
+Important business logic requires tests.
+
+Pay particular attention to:
 
 - Telegram authentication
 - team creation/join
@@ -190,37 +308,44 @@ Especially test:
 - invite rules
 - GPS radius validation
 - GPS accuracy validation
+- quest availability
 - quest completion
 - XP idempotency
+- concurrent mutation behavior
 - leaderboard ordering
+- authorization boundaries
 
-## Workflow
+Reuse existing test infrastructure.
 
-Before large changes:
+Do not replace PostgreSQL integration tests with SQLite substitutes.
 
-1. inspect existing code
-2. summarize implementation approach briefly
-3. make the changes
-4. run relevant tests
-5. fix failures
-6. summarize what changed
+For UI behavior, test the state that changed rather than merely snapshotting markup.
 
-Do not stop after generating a skeleton if the task asks for an end-to-end feature.
+For user-visible Mini App changes, check relevant mobile widths and applicable loading, empty, unavailable, active, error and completed states.
 
-## Current scope
+Use README and Makefile for exact commands; do not duplicate them here.
 
-The current goal is only the first vertical slice:
+---
 
-Telegram
-→ Mini App
-→ Team
-→ Invite
-→ Quest
-→ GPS Check-in
-→ XP
-→ Leaderboard
+## Definition of done
 
-Do not implement yet:
+Implement requested behavior before reporting completion:
+
+- relevant tests pass
+- type/lint/build checks relevant to the change pass
+- database migrations are valid when applicable
+- important failure states were considered
+- security and concurrency invariants remain intact
+- the final diff contains no unrelated changes
+- documentation is updated only when behavior or operating knowledge actually changed
+
+---
+
+## Scope discipline
+
+Prioritize the gameplay loop in Mission.
+
+Do not implement unless explicitly requested:
 
 - Secret Sidequests
 - AI
@@ -240,3 +365,7 @@ Do not implement yet:
 - social feed
 - route generator
 - AR
+
+Future extensibility must not complicate the current implementation.
+
+Build the smallest solid version of AYLOOR that can be tested with real players.
