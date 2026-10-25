@@ -44,6 +44,10 @@ async def seed(db: AsyncSession, *, development: bool) -> None:
                 description="Reach the first AYLOOR checkpoint and check in with your team.",
                 quest_type=QuestType.location,
                 verification_level=VerificationLevel.system,
+                # No invented place/photo: an operator authors optional content via admin API.
+                look_for_hint=None,
+                hero_image_url=None,
+                place_label=None,
                 base_xp=100,
                 latitude=0,
                 longitude=0,

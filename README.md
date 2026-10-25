@@ -342,6 +342,15 @@ POST/PUT quest требует `season_id`, `slug`, `title`, `description`, `lati
 между сезонами/городами не поддерживается. Получить season UUID можно через
 `GET /api/v1/seasons/current?city=yerevan`.
 
+Контент места задаётся теми же POST/PUT: nullable `look_for_hint` (до 1000 символов),
+`place_label` (до 255) и `hero_image_url` (HTTPS URL до 2048 символов, без credentials).
+Эти поля возвращаются admin API и публичными quest list/detail. PUT заменяет поля:
+передавайте существующий контент, чтобы сохранить его, либо `null` для очистки.
+Изображение должно быть доступно клиенту по URL; загрузки файлов и Maps SDK нет.
+Seed оставляет контент пустым до авторского заполнения: Mini App показывает явное
+отсутствие фото/подсказки, без автоматического Cascade или другого prototype content.
+Перед запуском обновлённого backend примените `make migrate`.
+
 ## Автоматические проверки
 
 Backend-тесты используют **настоящий PostgreSQL**, не SQLite. Нужна отдельная

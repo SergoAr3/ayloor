@@ -205,3 +205,57 @@ async def test_explicit_checkpoint_replacement_clears_only_placeholder_and_allow
     )
     assert activated.status_code == 200 and activated.json()["is_active"]
     assert len((await client.get("/api/v1/quests", headers=admin)).json()) == 1
+
+
+async def test_authored_quest_content_round_trips_admin_list_and_detail(client, login):
+    admin = await login(900001)
+    season = (await client.get("/api/v1/seasons/current", headers=admin)).json()
+    payload = {
+        "season_id": season["id"],
+        "slug": "authored-place",
+        "title": "Authored place",
+        "description": "Use the public entrance",
+        "latitude": 40.18,
+        "longitude": 44.51,
+        "look_for_hint": "The blue public entrance",
+        "place_label": "Public square",
+        "hero_image_url": "https://images.example.org/square.jpg",
+        "is_active": True,
+    }
+    created = await client.post("/api/v1/admin/quests", headers=admin, json=payload)
+    assert created.status_code == 201, created.text
+    qid = created.json()["id"]
+    for data in [
+        created.json(),
+        (await client.get(f"/api/v1/quests/{qid}", headers=admin)).json(),
+        next(
+            q for q in (await client.get("/api/v1/quests", headers=admin)).json() if q["id"] == qid
+        ),
+        next(
+            q
+            for q in (await client.get("/api/v1/admin/quests", headers=admin)).json()
+            if q["id"] == qid
+        ),
+    ]:
+        for key in ("look_for_hint", "place_label", "hero_image_url"):
+            assert data[key] == payload[key]
+    # Nullable fields can be explicitly cleared via the existing PUT endpoint.
+    cleared = await client.put(
+        f"/api/v1/admin/quests/{qid}",
+        headers=admin,
+        json={**payload, "look_for_hint": None, "place_label": None, "hero_image_url": None},
+    )
+    assert cleared.status_code == 200
+    assert cleared.json()["hero_image_url"] is None
+    assert (await client.get(f"/api/v1/quests/{qid}", headers=admin)).json()[
+        "look_for_hint"
+    ] is None
+    for url in [
+        "javascript:alert(1)",
+        "http://images.example.org/a.jpg",
+        "https://user:pass@example.org/a.jpg",
+    ]:
+        response = await client.put(
+            f"/api/v1/admin/quests/{qid}", headers=admin, json={**payload, "hero_image_url": url}
+        )
+        assert response.status_code == 422

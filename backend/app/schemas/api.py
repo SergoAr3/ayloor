@@ -2,7 +2,15 @@ from datetime import datetime
 from typing import Annotated, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    HttpUrl,
+    StringConstraints,
+    field_validator,
+    model_validator,
+)
 
 from app.models import (
     MemberRole,
@@ -114,6 +122,9 @@ class QuestOut(BaseModel):
     id: UUID
     title: str
     description: str
+    look_for_hint: str | None = None
+    hero_image_url: str | None = None
+    place_label: str | None = None
     base_xp: int
     latitude: float | None
     longitude: float | None
@@ -155,6 +166,29 @@ class QuestInput(Input):
     slug: Slug
     title: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=255)]
     description: str = Field(min_length=1, max_length=10000)
+    look_for_hint: (
+        Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=1000)]
+        | None
+    ) = None
+    hero_image_url: str | None = Field(default=None, max_length=2048)
+    place_label: (
+        Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=255)]
+        | None
+    ) = None
+
+    @field_validator("hero_image_url")
+    @classmethod
+    def validate_image_url(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        url = HttpUrl(value)
+        if url.scheme != "https" or url.username is not None or url.password is not None:
+            raise ValueError("Image URL must use HTTPS without credentials")
+        normalized = str(url)
+        if len(normalized) > 2048:
+            raise ValueError("Normalized image URL must not exceed 2048 characters")
+        return normalized
+
     # Future types exist in the data model, but v0.1 only authors system/location quests.
     quest_type: Literal["location"] = "location"
     verification_level: Literal["system"] = "system"
@@ -183,6 +217,9 @@ class QuestAdminOut(ORMModel):
     slug: str
     title: str
     description: str
+    look_for_hint: str | None = None
+    hero_image_url: str | None = None
+    place_label: str | None = None
     base_xp: int
     latitude: float | None
     longitude: float | None

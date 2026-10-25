@@ -68,7 +68,7 @@ test("two synthetic players complete the real API flow in a mobile browser", asy
   await captain
     .getByRole("button", { name: "CREATE TEAM", exact: true })
     .click();
-  await expect(captain.getByText("Waiting for teammates")).toBeVisible();
+  await expect(captain.getByText("WAITING FOR PLAYERS")).toBeVisible();
   await captain.getByRole("button", { name: "INVITE FRIENDS" }).click();
   const link = await captain
     .getByLabel("Invite link", { exact: true })
@@ -76,11 +76,11 @@ test("two synthetic players complete the real API flow in a mobile browser", asy
   const code = new URL(link).searchParams.get("start")!.replace("join_", "");
   await member.goto(`/?invite=${code}`);
   await member.getByRole("button", { name: "JOIN TEAM", exact: true }).click();
-  await expect(member.getByText("TEAM ACTIVE", { exact: true })).toBeVisible();
+  await expect(member.getByText("ACTIVE TEAM", { exact: true })).toBeVisible();
   await captain.getByRole("button", { name: "REFRESH TEAM" }).click();
-  await expect(captain.getByText("TEAM ACTIVE", { exact: true })).toBeVisible();
+  await expect(captain.getByText("ACTIVE TEAM", { exact: true })).toBeVisible();
   await captain.getByRole("button", { name: "QUESTS", exact: true }).click();
-  await captain.getByRole("button", { name: "OPEN →", exact: true }).click();
+  await captain.locator("button.quest-row").click();
   await captain.getByRole("button", { name: "START QUEST" }).click();
   expect(calls.count).toBe(0);
   await captain.getByText("Development coordinates", { exact: true }).click();
@@ -88,26 +88,26 @@ test("two synthetic players complete the real API flow in a mobile browser", asy
   await captain
     .getByRole("button", { name: "CHECK IN WITH DEV COORDINATES" })
     .click();
-  await expect(captain.getByRole("alert")).toContainText(
-    "outside the checkpoint radius",
-  );
-  await captain.getByRole("button", { name: "CHECK IN", exact: true }).click();
+  await expect(captain.getByRole("region", { name: "Quest check-in" }).getByRole("alert")).toContainText("NOT THERE YET.");
+  await expect(captain.locator(".app > .error")).toHaveCount(0);
+  await expect(captain.getByText(/Distance at last check-in/)).toHaveCount(0);
+  await captain.getByRole("button", { name: "TRY AGAIN", exact: true }).click();
   await expect(
-    captain.getByText("QUEST COMPLETE", { exact: true }),
+    captain.getByRole("heading", { name: "Quest complete.", exact: true }),
   ).toBeVisible();
   expect(calls.count).toBe(1);
   await captain.getByRole("button", { name: "VIEW LEADERBOARD" }).click();
-  await expect(captain.locator(".ranking .own")).toContainText("100");
+  await expect(captain.locator(".ranking .own div > span")).toHaveText("100 XP");
   await captain.screenshot({
     path: "test-results/leaderboard-mobile.png",
     fullPage: true,
   });
   await captain.reload();
-  await captain.getByRole("button", { name: "QUESTS →", exact: true }).click();
+  await captain.getByRole("button", { name: "QUESTS", exact: true }).click();
   await captain
-    .getByRole("button", { name: "COMPLETED ✓", exact: true })
+    .locator("button.quest-row.completed")
     .click();
-  await expect(captain.getByText("COMPLETED ✓", { exact: true })).toBeVisible();
+  await expect(captain.getByText("QUEST COMPLETE ✓", { exact: true })).toBeVisible();
   await expect(
     captain.getByRole("button", { name: "START QUEST" }),
   ).toHaveCount(0);
@@ -118,6 +118,9 @@ test("two synthetic players complete the real API flow in a mobile browser", asy
     () => document.documentElement.scrollWidth > innerWidth,
   );
   expect(overflow).toBe(false);
+  await captain.getByRole("button", { name: "ALL QUESTS", exact: true }).click();
+  await captain.getByRole("button", { name: "RANKS", exact: true }).click();
+  await expect(captain.locator(".ranking .own div > span")).toHaveText("100 XP");
   expect(errors).toEqual([]);
   await first.close();
   await second.close();
@@ -163,7 +166,7 @@ test("create team reconciles a lost response to the Team screen without reload",
     await expect(
       page.getByRole("heading", { name: `Recovered ${stamp}`, exact: true }),
     ).toBeVisible();
-    await expect(page.getByText("Waiting for teammates")).toBeVisible();
+    await expect(page.getByText("WAITING FOR PLAYERS")).toBeVisible();
     await expect(page.getByRole("alert")).toHaveCount(0);
     expect(committed && reconciled).toBe(true);
     expect(submissions).toBe(1);
@@ -253,7 +256,7 @@ for (const failure of ["lost response", "retry conflict"] as const) {
           .click();
       }
       await expect(
-        member.getByText("TEAM ACTIVE", { exact: true }),
+        member.getByText("ACTIVE TEAM", { exact: true }),
       ).toBeVisible();
       await expect(
         member.getByRole("heading", { name: `Recovery ${stamp}`, exact: true }),

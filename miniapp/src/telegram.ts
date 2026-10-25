@@ -10,6 +10,28 @@ export function getInviteCode(
   return code && /^[A-Za-z0-9_-]{1,40}$/.test(code) ? code : null;
 }
 
+export function canOpenLocationSettings(webapp: WebApp | undefined): boolean {
+  const manager = webapp?.LocationManager;
+  return Boolean(
+    typeof webapp?.isVersionAtLeast === "function" && webapp.isVersionAtLeast("8.0")
+    && manager?.isInited && manager.isLocationAvailable
+    && manager.isAccessRequested === true && manager.isAccessGranted === false
+    && typeof manager.openSettings === "function",
+  );
+}
+
+// Call synchronously from a user click. Initialization already happens during
+// CHECK IN; awaiting init here could lose Telegram's user-interaction context.
+export function openLocationSettings(webapp: WebApp | undefined): boolean {
+  if (!canOpenLocationSettings(webapp)) return false;
+  try {
+    webapp!.LocationManager!.openSettings!();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export function requestLocation(
   webapp: WebApp | undefined,
   development: boolean,
@@ -21,6 +43,15 @@ export function requestLocation(
     );
     const done = (coordinates: Coordinates) => {
       clearTimeout(timer);
+      if (!Number.isFinite(coordinates.latitude) || !Number.isFinite(coordinates.longitude)
+        || Math.abs(coordinates.latitude) > 90 || Math.abs(coordinates.longitude) > 180) {
+        reject(new Error("GPS coordinates are unavailable. Please retry outdoors."));
+        return;
+      }
+      if (!Number.isFinite(coordinates.horizontal_accuracy) || coordinates.horizontal_accuracy < 0) {
+        reject(new Error("GPS accuracy is unavailable. Please retry outdoors."));
+        return;
+      }
       resolve(coordinates);
     };
     const fail = (message: string) => {
