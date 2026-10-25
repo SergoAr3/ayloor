@@ -197,6 +197,9 @@ class Quest(Identity, Created, Updated, Base):
     slug: Mapped[str] = mapped_column(String(100), unique=True)
     title: Mapped[str] = mapped_column(String(255))
     description: Mapped[str] = mapped_column(Text)
+    look_for_hint: Mapped[str | None] = mapped_column(String(1000))
+    hero_image_url: Mapped[str | None] = mapped_column(String(2048))
+    place_label: Mapped[str | None] = mapped_column(String(255))
     quest_type: Mapped[QuestType] = mapped_column(Enum(QuestType), default=QuestType.location)
     verification_level: Mapped[VerificationLevel] = mapped_column(
         Enum(VerificationLevel), default=VerificationLevel.system

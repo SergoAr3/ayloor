@@ -17,3 +17,6 @@ dist/
 .DS_Store
 playwright-report/
 test-results/
+
+# Local before/after reconciliation captures and runtime diagnostics.
+.visual-qa/

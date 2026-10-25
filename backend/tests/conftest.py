@@ -69,7 +69,7 @@ async def database(monkeypatch):
     async with engine.begin() as connection:
         # Schema must come from Alembic, so tests exercise the real migration constraints/triggers.
         revision = await connection.scalar(text("SELECT version_num FROM alembic_version"))
-        assert revision == "0001", "Run migrations on the dedicated test database first"
+        assert revision == "0002", "Run migrations on the dedicated test database first"
         await connection.execute(
             text(
                 "TRUNCATE submissions, score_events, quest_runs, invites, team_members, "

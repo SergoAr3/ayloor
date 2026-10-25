@@ -1,28 +1,29 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, setToken } from "./api";
-import { getInviteCode, requestLocation } from "./telegram";
+import { ApiError, ApiTransportError } from "./apiErrors";
+import { canOpenLocationSettings, getInviteCode, openLocationSettings, requestLocation } from "./telegram";
 import { changeTeam } from "./teamMutation";
-import type {
-  Coordinates,
-  Invite,
-  Me,
-  Member,
-  Quest,
-  Ranking,
-  Run,
-} from "./types";
+import { checkInAge, checkInFeedback, startQuest } from "./questState";
+import { ActionButton, AppHeader, BottomNav, ErrorNotice, QuestDetailHeader, type Screen } from "./components/ui";
+import HomeScreen from "./screens/HomeScreen";
+import TeamScreen from "./screens/TeamScreen";
+import RanksScreen from "./screens/RanksScreen";
+import { QuestsScreen } from "./screens/QuestsScreen";
+import { CompleteScreen, QuestScreen } from "./screens/QuestScreens";
+import { MotionDiagnostics } from "./components/MotionDiagnostics";
+import type { Coordinates, Invite, Me, Member, Quest, Ranking, Run } from "./types";
 
-type Screen = "home" | "team" | "quests" | "quest" | "leaderboard" | "complete";
 const tg = window.Telegram?.WebApp;
-const inviteCode = getInviteCode(
-  location.search,
-  tg?.initDataUnsafe?.start_param,
-);
+const inviteCode = getInviteCode(location.search, tg?.initDataUnsafe?.start_param);
+const sessionMessage = "Session expired. Reopen AYLOOR from the bot to sign in.";
+const message = (error: unknown) => error instanceof Error ? error.message : "Something went wrong. Please retry.";
 
 export default function App() {
   const [me, setMe] = useState<Me | null>(null);
   const [screen, setScreen] = useState<Screen>("home");
-  const [quests, setQuests] = useState<Quest[]>([]);
+  const [quests, setQuests] = useState<Quest[] | null>(null);
+  const [questLoading, setQuestLoading] = useState(false);
+  const [questError, setQuestError] = useState("");
   const [selected, setSelected] = useState<Quest | null>(null);
   const [ranking, setRanking] = useState<Ranking | null>(null);
   const [members, setMembers] = useState<Member[]>([]);
@@ -30,643 +31,298 @@ export default function App() {
   const [shareLink, setShareLink] = useState("");
   const [name, setName] = useState("");
   const [error, setError] = useState("");
+  const [checkInError, setCheckInError] = useState<{ questId: string; message: string } | null>(null);
+  const [locationSettingsAvailable, setLocationSettingsAvailable] = useState(false);
+  const [refreshError, setRefreshError] = useState("");
   const [busy, setBusy] = useState(false);
   const busyRef = useRef(false);
+  // An in-flight success from a previous session must never restore gameplay after 401.
+  const sessionEpoch = useRef(0);
+  const teamId = useRef<string | undefined>(undefined);
+  const questRequest = useRef(0);
   const [loading, setLoading] = useState(true);
   const [development, setDevelopment] = useState(false);
   const [initData, setInitData] = useState("");
-  const [awarded, setAwarded] = useState(0);
-  const [coordinates, setCoordinates] = useState<Coordinates>({
-    latitude: 0,
-    longitude: 0,
-    horizontal_accuracy: 25,
-  });
+  const [awarded, setAwarded] = useState<number | null>(null);
+  const [stage, setStage] = useState<"" | "location" | "verification">("");
+  const [sample, setSample] = useState<{ questId: string; data: Coordinates; checkedAt: number } | null>(null);
+  const [sampleNow, setSampleNow] = useState(Date.now);
+  useEffect(() => {
+    if (!sample) return;
+    let timer: ReturnType<typeof setInterval> | undefined;
+    const tick = () => {
+      const now = Date.now();
+      setSampleNow(now);
+      if (checkInAge(sample.checkedAt, now) == null) { setSample(null); setCheckInError(null); }
+    };
+    const visibility = () => {
+      clearInterval(timer); timer = undefined;
+      if (!document.hidden) { tick(); timer = setInterval(tick, 60_000); }
+    };
+    visibility();
+    document.addEventListener("visibilitychange", visibility);
+    return () => { clearInterval(timer); document.removeEventListener("visibilitychange", visibility); };
+  }, [sample]);
+  useEffect(() => {
+    const leave = () => setSample(null);
+    window.addEventListener("pagehide", leave);
+    return () => window.removeEventListener("pagehide", leave);
+  }, []);
+  const [coordinates, setCoordinates] = useState<Coordinates>({ latitude: 0, longitude: 0, horizontal_accuracy: 25 });
 
-  const action = useCallback(async (work: () => Promise<void>) => {
+  const request = useCallback(async <T,>(path: string, body?: unknown): Promise<T> => {
+    const epoch = sessionEpoch.current;
+    let result: T;
+    try { result = await api<T>(path, body); }
+    catch (error) {
+      if (path === "/auth/telegram" && error instanceof ApiError && error.status === 401)
+        setError(`Telegram sign in failed: ${error.message}. Reopen AYLOOR from the bot.`);
+      throw error;
+    }
+    if (epoch !== sessionEpoch.current) throw new Error(sessionMessage);
+    return result;
+  }, []);
+
+  const action = useCallback(async (work: () => Promise<void>, checkInQuestId?: string) => {
     if (busyRef.current) return;
+    const epoch = sessionEpoch.current;
     busyRef.current = true;
     setBusy(true);
     setError("");
-    try {
-      await work();
-    } catch (e) {
-      setError(
-        e instanceof Error ? e.message : "Something went wrong. Please retry.",
-      );
-    } finally {
-      busyRef.current = false;
-      setBusy(false);
+    if (checkInQuestId) setCheckInError(null);
+    try { await work(); }
+    catch (e) {
+      if (epoch === sessionEpoch.current) {
+        const appLevel = e instanceof ApiError && (e.status === 401 || e.status === 403 || e.message === "Team must be active");
+        if (checkInQuestId && !appLevel) setCheckInError({ questId: checkInQuestId, message: message(e) });
+        else setError(message(e));
+      }
     }
+    finally { busyRef.current = false; setBusy(false); setStage(""); }
   }, []);
+
+  const loadQuests = useCallback(async () => {
+    const epoch = sessionEpoch.current;
+    const id = ++questRequest.current;
+    setQuestLoading(true);
+    setQuestError("");
+    try {
+      const list = await request<Quest[]>("/quests");
+      if (id === questRequest.current) setQuests(list);
+    } catch (e) {
+      if (epoch === sessionEpoch.current && id === questRequest.current) setQuestError(message(e));
+    } finally {
+      if (epoch === sessionEpoch.current && id === questRequest.current) setQuestLoading(false);
+    }
+  }, [request]);
 
   const refresh = useCallback(async () => {
-    const current = await api<Me>("/me");
-    setMe(current);
-    if (current.team) {
-      const [board, people] = await Promise.all([
-        api<Ranking>("/leaderboard"),
-        api<Member[]>(`/teams/${current.team.id}/members`),
-      ]);
-      setRanking(board);
-      setMembers(people);
-    } else {
-      setRanking(null);
-      setMembers([]);
+    const epoch = sessionEpoch.current;
+    const current = await request<Me>("/me");
+    if (teamId.current !== current.team?.id) {
+      if (teamId.current) setScreen("team");
+      setCheckInError(null);
+      setRanking(null); setMembers([]); setShareLink(""); setSelected(null); setSample(null);
     }
+    teamId.current = current.team?.id;
+    setMe(current);
+    setRefreshError("");
+    // Auxiliary data must not prevent /me from confirming membership.
+    const [board, people] = await Promise.allSettled([
+      request<Ranking>("/leaderboard"),
+      current.team ? request<Member[]>(`/teams/${current.team.id}/members`) : Promise.resolve([] as Member[]),
+    ]);
+    if (epoch !== sessionEpoch.current || teamId.current !== current.team?.id) throw new Error(sessionMessage);
+    if (board.status === "fulfilled") setRanking(board.value);
+    if (people.status === "fulfilled") setMembers(people.value);
+    const failures = [board, people].filter(result => result.status === "rejected");
+    if (failures.length) setRefreshError("Team or leaderboard refresh failed. Previously loaded data may be out of date. Please retry.");
     return current;
-  }, []);
+  }, [request]);
 
-  const authenticate = useCallback(
-    async (raw: string) => {
-      const result = await api<{ access_token: string }>("/auth/telegram", {
-        init_data: raw,
-      });
-      setToken(result.access_token);
+  const authenticate = useCallback(async (raw: string) => {
+    const result = await request<{ access_token: string }>("/auth/telegram", { init_data: raw });
+    setToken(result.access_token);
+    const current = await refresh();
+    if (!current.team) setScreen("team");
+    if (inviteCode && !current.team) setInvitation(await request<Invite>(`/invites/${inviteCode}`));
+  }, [refresh, request]);
+
+  const connect = useCallback(async () => {
+    const config = await request<{ development_gps_enabled: boolean }>("/config");
+    setDevelopment(import.meta.env.DEV && config.development_gps_enabled);
+    if (tg?.initData) await authenticate(tg.initData);
+    else if (sessionStorage.getItem("ayloor-token")) {
       const current = await refresh();
-      if (inviteCode && !current.team)
-        setInvitation(await api<Invite>(`/invites/${inviteCode}`));
-    },
-    [refresh],
-  );
+      if (!current.team) setScreen("team");
+      if (inviteCode && !current.team) setInvitation(await request<Invite>(`/invites/${inviteCode}`));
+    }
+  }, [authenticate, refresh, request]);
 
   useEffect(() => {
-    tg?.ready();
-    tg?.expand();
-    void action(async () => {
-      try {
-        const config = await api<{ development_gps_enabled: boolean }>(
-          "/config",
-        );
-        setDevelopment(import.meta.env.DEV && config.development_gps_enabled);
-        if (tg?.initData) await authenticate(tg.initData);
-        else if (sessionStorage.getItem("ayloor-token")) {
-          const current = await refresh();
-          if (inviteCode && !current.team)
-            setInvitation(await api<Invite>(`/invites/${inviteCode}`));
-        }
-      } finally {
-        setLoading(false);
-      }
-    });
     const expired = () => {
-      setMe(null);
-      setError("Session expired. Reopen AYLOOR from the bot to sign in.");
+      sessionEpoch.current++;
+      questRequest.current++;
+      teamId.current = undefined;
+      setMe(null); setQuests(null); setSelected(null); setRanking(null); setMembers([]);
+      setInvitation(null); setShareLink(""); setSample(null); setAwarded(null);
+      setCheckInError(null);
+      setQuestError(""); setRefreshError(""); setQuestLoading(false); setScreen("home");
+      setError(sessionMessage);
     };
     window.addEventListener("ayloor-session-expired", expired);
+    tg?.ready(); tg?.expand();
+    void action(async () => {
+      try { await connect();
+      } finally { setLoading(false); }
+    });
     return () => window.removeEventListener("ayloor-session-expired", expired);
-  }, [action, authenticate, refresh]);
+  }, [action, connect]);
 
   useEffect(() => {
-    if (!me?.team || me.team.status !== "pending") return;
+    if (me) void loadQuests();
+  // Home data loads independently; membership reconciliation never awaits it.
+  }, [me?.user.id, me?.team?.id, loadQuests]);
+
+  useEffect(() => {
+    const update = () => setLocationSettingsAvailable(canOpenLocationSettings(tg));
+    update();
+    if (!tg?.onEvent || !tg.offEvent) return;
+    tg.onEvent("locationManagerUpdated", update);
+    return () => tg.offEvent?.("locationManagerUpdated", update);
+  }, [checkInError]);
+
+  useEffect(() => {
+    if (me?.team?.status !== "pending") return;
     const id = window.setInterval(() => {
-      if (!busyRef.current) void refresh().catch((e) => setError(String(e)));
+      if (!busyRef.current) void refresh().catch(e => setError(message(e)));
     }, 5000);
     return () => window.clearInterval(id);
   }, [me?.team?.id, me?.team?.status, refresh]);
 
-  async function openQuests() {
-    setQuests(await api<Quest[]>("/quests"));
-    setScreen("quests");
+  function navigate(next: Screen) {
+    if (busyRef.current) return;
+    setScreen(next);
+    setError("");
+    setCheckInError(null);
+    window.scrollTo({ top: 0 });
+    void action(async () => {
+      await refresh();
+      if (next === "home" || next === "quests") await loadQuests();
+    });
   }
 
-  async function updateTeam(
-    mutate: () => Promise<unknown>,
-    expectedTeamId?: string,
-  ) {
-    await changeTeam(
-      mutate,
-      async () => {
-        const current = await refresh();
-        if (current.team) setScreen("team");
-        return current;
-      },
-      expectedTeamId,
+  async function updateTeam(mutate: () => Promise<unknown>, expectedTeamId?: string) {
+    await changeTeam(mutate, refresh, expectedTeamId);
+    setInvitation(null); setScreen("team");
+  }
+
+  function rememberQuest(quest: Quest) {
+    setCheckInError(null);
+    setSelected(quest);
+    setQuests(list => list?.map(item => item.id === quest.id ? quest : item) ?? null);
+  }
+
+  async function openQuest(quest: Quest) {
+    const detail = await request<Quest>(`/quests/${quest.id}`);
+    setSample(null); // A reopened quest must not present an old fix as current.
+    rememberQuest(detail);
+    setScreen("quest"); window.scrollTo({ top: 0 });
+  }
+
+  async function play(quest: Quest) {
+    const detail = await request<Quest>(`/quests/${quest.id}`);
+    setSample(null);
+    if (detail.run) { rememberQuest(detail); setScreen("quest"); return; }
+    const run = await startQuest(
+      () => request<Run>(`/quests/${detail.id}/start`, {}),
+      () => request<Quest>(`/quests/${detail.id}`),
     );
-    setInvitation(null);
+    rememberQuest({ ...detail, run }); setScreen("quest"); window.scrollTo({ top: 0 });
+  }
+
+  function confirmed(quest: Quest, amount: number | null) {
+    rememberQuest(quest); setAwarded(amount); setStage(""); setScreen("complete");
+    window.scrollTo({ top: 0 });
+    // Completion is already confirmed. These read failures never undo it.
+    void refresh().catch(e => setRefreshError(message(e)));
+    void loadQuests();
   }
 
   async function complete(data: Coordinates) {
     if (!selected?.run) return;
-    const result = await api<{ run: Run; awarded_xp: number }>(
-      `/quest-runs/${selected.run.id}/check-in`,
-      data,
-    );
-    setSelected({ ...selected, run: result.run });
-    setAwarded(result.awarded_xp);
-    await refresh();
-    setScreen("complete");
+    setStage("verification");
+    try {
+      const result = await request<{ run: Run; awarded_xp: number }>(`/quest-runs/${selected.run.id}/check-in`, data);
+      confirmed({ ...selected, run: result.run }, result.awarded_xp);
+    } catch (e) {
+      if (!(e instanceof ApiTransportError)) throw e;
+      let detail: Quest;
+      try { detail = await request<Quest>(`/quests/${selected.id}`); } catch { throw e; }
+      if (detail.run?.status !== "completed") throw e;
+      confirmed(detail, null);
+    }
   }
 
+  async function checkIn() {
+    if (!selected) return;
+    const epoch = sessionEpoch.current;
+    setSample(null);
+    setStage("location");
+    const data = await requestLocation(tg, import.meta.env.DEV && development);
+    if (epoch !== sessionEpoch.current) throw new Error(sessionMessage);
+    setSample({ questId: selected.id, data, checkedAt: Date.now() });
+    await complete(data);
+  }
+
+  async function invite() {
+    if (!me?.team) return;
+    const result = await request<Invite>(`/teams/${me.team.id}/invites`, {});
+    if (!result.link) throw new Error("Invite links are not configured. Please contact the game organizer.");
+    setShareLink(result.link);
+    tg?.openTelegramLink(`https://t.me/share/url?url=${encodeURIComponent(result.link)}&text=${encodeURIComponent(`Join ${me.team.name} on AYLOOR. The city is your game.`)}`);
+  }
+
+  function locationSettings() {
+    if (!selected || busyRef.current) return;
+    if (!openLocationSettings(tg)) {
+      setCheckInError({ questId: selected.id, message: "Location settings could not be opened in this Telegram client. Check location permissions manually, then press CHECK IN again." });
+    }
+  }
+
+  const runAction = (work: () => Promise<void>) => { void action(work); };
   const team = me?.team;
-  return (
-    <main>
-      <header>
-        <a
-          href="#"
-          onClick={(event) => {
-            event.preventDefault();
-            setScreen("home");
-          }}
-        >
-          AYLOOR<span>●</span>
-        </a>
-        <small>
-          YEREVAN
-          <br />
-          SEASON ZERO
-        </small>
-      </header>
-      {error && (
-        <div role="alert" className="error">
-          {error}
-          <button
-            className="quiet"
-            onClick={() => setError("")}
-            aria-label="Dismiss error"
-          >
-            ×
-          </button>
-        </div>
-      )}
-      {loading ? (
-        <section>
-          <p className="eyebrow">CONNECTING</p>
-          <h1>
-            The city is
-            <br />
-            your game.
-          </h1>
-          <p>Opening AYLOOR…</p>
-        </section>
-      ) : !me ? (
-        <section>
-          <p className="eyebrow">PLAY THE REAL WORLD.</p>
-          <h1>
-            The city is
-            <br />
-            your game.
-          </h1>
-          <p>Open AYLOOR from the Telegram bot to sign in.</p>
-          <button
-            disabled={busy || !tg?.initData}
-            onClick={() =>
-              void action(async () => {
-                await authenticate(tg!.initData);
-              })
-            }
-          >
-            RETRY TELEGRAM SIGN IN
-          </button>
-          {import.meta.env.DEV && development && (
-            <details>
-              <summary>Development sign in</summary>
-              <label>
-                Signed Telegram initData
-                <textarea
-                  value={initData}
-                  onChange={(e) => setInitData(e.target.value)}
-                />
-              </label>
-              <button
-                disabled={busy || !initData}
-                onClick={() =>
-                  void action(async () => {
-                    await authenticate(initData);
-                  })
-                }
-              >
-                SIGN IN
-              </button>
-            </details>
-          )}
-        </section>
-      ) : !team ? (
-        <section>
-          <p className="eyebrow">PLAY THE REAL WORLD.</p>
-          <h1>
-            The city is
-            <br />
-            your game.
-          </h1>
-          <p>Find your people. Take on Yerevan together.</p>
-          {invitation && (
-            <article>
-              <p className="eyebrow">YOU'RE INVITED</p>
-              <h2>{invitation.team.name}</h2>
-              <p>{invitation.team.member_count} / 5 members</p>
-              <button
-                disabled={busy}
-                onClick={() =>
-                  void action(async () => {
-                    await updateTeam(
-                      () => api(`/invites/${invitation.code}/join`, {}),
-                      invitation.team.id,
-                    );
-                  })
-                }
-              >
-                JOIN TEAM
-              </button>
-            </article>
-          )}
-          <form
-            onSubmit={(event) => {
-              event.preventDefault();
-              void action(async () => {
-                await updateTeam(() => api("/teams", { name }));
-              });
-            }}
-          >
-            <label>
-              Team name
-              <input
-                value={name}
-                onChange={(event) => setName(event.target.value)}
-                maxLength={80}
-                placeholder="Kentron Mafia"
-                required
-              />
-            </label>
-            <button disabled={busy || !name.trim()}>CREATE TEAM</button>
-          </form>
-        </section>
-      ) : (
-        <>
-          {team.status === "pending" || screen === "team" ? (
-            <section>
-              <p className="eyebrow">YOUR TEAM</p>
-              <h1>{team.name}</h1>
-              <div className="stat">
-                <strong>
-                  {team.member_count}
-                  <span> / 5</span>
-                </strong>
-                <p>
-                  {team.status === "pending"
-                    ? "Waiting for teammates"
-                    : "TEAM ACTIVE"}
-                </p>
-              </div>
-              <ul className="members">
-                {members.map((member) => (
-                  <li key={member.user.id}>
-                    {member.user.first_name || member.user.username || "Player"}
-                    <small>{member.role}</small>
-                  </li>
-                ))}
-              </ul>
-              {team.member_count < 5 && (
-                <button
-                  disabled={busy}
-                  onClick={() =>
-                    void action(async () => {
-                      const invite = await api<Invite>(
-                        `/teams/${team.id}/invites`,
-                        {},
-                      );
-                      if (!invite.link)
-                        throw new Error(
-                          "Invite links are not configured. Set TELEGRAM_BOT_USERNAME on the backend.",
-                        );
-                      setShareLink(invite.link);
-                      tg?.openTelegramLink(
-                        `https://t.me/share/url?url=${encodeURIComponent(invite.link)}&text=${encodeURIComponent(`Join ${team.name} on AYLOOR. The city is your game.`)}`,
-                      );
-                    })
-                  }
-                >
-                  INVITE FRIENDS
-                </button>
-              )}
-              {shareLink && (
-                <div>
-                  <label htmlFor="invite-link">Invite link</label>
-                  <input
-                    id="invite-link"
-                    readOnly
-                    value={shareLink}
-                    onFocus={(e) => e.target.select()}
-                  />
-                  <button
-                    className="secondary"
-                    disabled={busy}
-                    onClick={() =>
-                      void action(async () => {
-                        await navigator.clipboard.writeText(shareLink);
-                      })
-                    }
-                  >
-                    COPY LINK
-                  </button>
-                </div>
-              )}
-              <button
-                className="secondary"
-                disabled={busy}
-                onClick={() =>
-                  void action(async () => {
-                    await refresh();
-                  })
-                }
-              >
-                REFRESH TEAM
-              </button>
-            </section>
-          ) : screen === "home" ? (
-            <section>
-              <p className="eyebrow">TEAM ACTIVE · SEASON ZERO</p>
-              <h1>{team.name}</h1>
-              <div className="score">
-                <strong>
-                  {ranking?.current_user_team_xp ?? 0}
-                  <span> XP</span>
-                </strong>
-                <p>#{ranking?.current_user_team_rank ?? "—"} YEREVAN</p>
-              </div>
-              <p>
-                The city is your game.
-                <br />
-                Your first checkpoint is waiting.
-              </p>
-              <button disabled={busy} onClick={() => void action(openQuests)}>
-                QUESTS →
-              </button>
-              <button
-                className="secondary"
-                disabled={busy}
-                onClick={() =>
-                  void action(async () => {
-                    await refresh();
-                    setScreen("leaderboard");
-                  })
-                }
-              >
-                LEADERBOARD
-              </button>
-            </section>
-          ) : screen === "quests" ? (
-            <section>
-              <p className="eyebrow">EXPLORE YEREVAN</p>
-              <h1>Quests</h1>
-              {!quests.length && <p>No quests are available right now.</p>}
-              {quests.map((quest) => (
-                <article key={quest.id}>
-                  <span className="reward">+{quest.base_xp} XP</span>
-                  <h2>{quest.title}</h2>
-                  <p>{quest.description}</p>
-                  <button
-                    className="secondary"
-                    disabled={busy}
-                    onClick={() =>
-                      void action(async () => {
-                        setSelected(await api<Quest>(`/quests/${quest.id}`));
-                        setScreen("quest");
-                      })
-                    }
-                  >
-                    {quest.run?.status === "completed"
-                      ? "COMPLETED ✓"
-                      : "OPEN →"}
-                  </button>
-                </article>
-              ))}
-            </section>
-          ) : screen === "quest" && selected ? (
-            <section>
-              <p className="eyebrow">
-                {selected.run?.status === "started"
-                  ? "QUEST ACTIVE"
-                  : "CITY CHECKPOINT"}
-              </p>
-              <h1>{selected.title}</h1>
-              <p>{selected.description}</p>
-              <div className="score">
-                <strong>
-                  +{selected.base_xp}
-                  <span> XP</span>
-                </strong>
-              </div>
-              <p>
-                Checkpoint: {selected.latitude?.toFixed(5)},{" "}
-                {selected.longitude?.toFixed(5)}
-                <br />
-                Check in within {selected.radius_m} m.
-              </p>
-              {selected.run?.status === "completed" ? (
-                <p className="success">COMPLETED ✓</p>
-              ) : selected.run?.status === "failed" ? (
-                <p>This quest run is closed.</p>
-              ) : !selected.run ? (
-                <button
-                  disabled={busy}
-                  onClick={() =>
-                    void action(async () => {
-                      const run = await api<Run>(
-                        `/quests/${selected.id}/start`,
-                        {},
-                      );
-                      setSelected({ ...selected, run });
-                    })
-                  }
-                >
-                  START QUEST
-                </button>
-              ) : (
-                <>
-                  <button
-                    disabled={busy}
-                    onClick={() =>
-                      void action(async () => {
-                        await complete(
-                          await requestLocation(
-                            tg,
-                            import.meta.env.DEV && development,
-                          ),
-                        );
-                      })
-                    }
-                  >
-                    {busy ? "CHECKING…" : "CHECK IN"}
-                  </button>
-                  <p className="hint">
-                    Location is requested only when you check in. Stay on public
-                    paths and cross roads safely.
-                  </p>
-                  {tg?.LocationManager && tg.isVersionAtLeast("8.0") && (
-                    <button
-                      className="secondary"
-                      disabled={busy}
-                      onClick={() => tg.LocationManager?.openSettings()}
-                    >
-                      LOCATION SETTINGS
-                    </button>
-                  )}
-                  {import.meta.env.DEV && development && (
-                    <details>
-                      <summary>Development coordinates</summary>
-                      <p>
-                        Placeholder: 0, 0. Server verification remains enabled.
-                      </p>
-                      {(
-                        [
-                          "latitude",
-                          "longitude",
-                          "horizontal_accuracy",
-                        ] as const
-                      ).map((key) => (
-                        <label key={key}>
-                          {key}
-                          <input
-                            type="number"
-                            step="any"
-                            value={coordinates[key]}
-                            onChange={(e) =>
-                              setCoordinates({
-                                ...coordinates,
-                                [key]: Number(e.target.value),
-                              })
-                            }
-                          />
-                        </label>
-                      ))}
-                      <button
-                        disabled={busy}
-                        onClick={() =>
-                          void action(async () => {
-                            await complete(coordinates);
-                          })
-                        }
-                      >
-                        CHECK IN WITH DEV COORDINATES
-                      </button>
-                    </details>
-                  )}
-                </>
-              )}
-            </section>
-          ) : screen === "complete" ? (
-            <section>
-              <p className="eyebrow">QUEST COMPLETE</p>
-              <h1>
-                City explored.
-                <br />
-                XP earned.
-              </h1>
-              <div className="score">
-                <strong>
-                  +{awarded}
-                  <span> XP</span>
-                </strong>
-              </div>
-              {awarded === 0 && (
-                <p>This quest was already completed. Your XP is safe.</p>
-              )}
-              <p>
-                {team.name}
-                <br />#{ranking?.current_user_team_rank ?? "—"} YEREVAN
-              </p>
-              <button
-                disabled={busy}
-                onClick={() =>
-                  void action(async () => {
-                    await refresh();
-                    setScreen("leaderboard");
-                  })
-                }
-              >
-                VIEW LEADERBOARD
-              </button>
-            </section>
-          ) : screen === "leaderboard" ? (
-            <section>
-              <p className="eyebrow">AYLOOR YEREVAN · SEASON ZERO</p>
-              <h1>Leaderboard</h1>
-              {ranking?.xp_to_next_rank != null && (
-                <p>
-                  {ranking.xp_to_next_rank} XP to #
-                  {(ranking.current_user_team_rank ?? 2) - 1}
-                </p>
-              )}
-              <ol className="ranking">
-                {ranking?.entries.map((entry) => (
-                  <li
-                    key={entry.team_id}
-                    className={entry.team_id === team.id ? "own" : ""}
-                  >
-                    <span className="rank">{entry.rank}</span>
-                    <span>{entry.team_name}</span>
-                    <strong>
-                      {entry.xp}
-                      <small> XP</small>
-                    </strong>
-                  </li>
-                ))}
-              </ol>
-              <button
-                className="secondary"
-                disabled={busy}
-                onClick={() =>
-                  void action(async () => {
-                    await refresh();
-                  })
-                }
-              >
-                REFRESH
-              </button>
-            </section>
-          ) : null}
-          {team.status === "active" && (
-            <nav aria-label="Main navigation">
-              <button
-                aria-current={screen === "home" ? "page" : undefined}
-                disabled={busy}
-                onClick={() =>
-                  void action(async () => {
-                    await refresh();
-                    setScreen("home");
-                  })
-                }
-              >
-                HOME
-              </button>
-              <button
-                aria-current={
-                  ["quests", "quest"].includes(screen) ? "page" : undefined
-                }
-                disabled={busy}
-                onClick={() => void action(openQuests)}
-              >
-                QUESTS
-              </button>
-              <button
-                aria-current={screen === "leaderboard" ? "page" : undefined}
-                disabled={busy}
-                onClick={() =>
-                  void action(async () => {
-                    await refresh();
-                    setScreen("leaderboard");
-                  })
-                }
-              >
-                RANKS
-              </button>
-              <button
-                aria-current={screen === "team" ? "page" : undefined}
-                disabled={busy}
-                onClick={() =>
-                  void action(async () => {
-                    await refresh();
-                    setScreen("team");
-                  })
-                }
-              >
-                TEAM
-              </button>
-            </nav>
-          )}
-        </>
-      )}
-      <footer>AYLOOR · PLAY THE REAL WORLD.</footer>
-    </main>
-  );
+  const focused = me && ((selected && (screen === "quest" || screen === "complete")) || (team && screen === "team"));
+  const detailScreen = !!(me && selected && screen === "quest");
+  const header = <AppHeader busy={busy} showTicker={screen === "home" || screen === "quests"} home={() => me ? navigate("home") : setScreen("home")} />;
+  const feedback = selected && checkInError?.questId === selected.id ? checkInFeedback(checkInError.message) : null;
+  return <main className={`app${screen === "home" ? " home-page" : ""}${detailScreen ? " quest-detail-screen" : ""}${focused ? " focused-screen" : ""}${screen === "quest" && feedback ? " result-screen" : ""}${me && selected && screen === "complete" ? " reward-screen" : ""}`}>
+    {me && selected && screen === "complete" && <div className="reward-halftone" aria-hidden="true" />}
+    {!detailScreen && header}
+    {error && <ErrorNotice dismiss={() => setError("")}>{error}</ErrorNotice>}
+    {me && refreshError && <ErrorNotice>{refreshError}<ActionButton secondary disabled={busy} onClick={() => runAction(async () => { await refresh(); })}>RETRY REFRESH</ActionButton></ErrorNotice>}
+    {loading ? <section><p className="eyebrow">CONNECTING</p><h1>The city is<br />your game.</h1><p role="status">Opening AYLOOR…</p></section>
+      : !me ? <section><p className="eyebrow">PLAY THE REAL WORLD.</p><h1>The city is<br />your game.</h1><p>Open AYLOOR from the Telegram bot to sign in.</p>
+        <ActionButton disabled={busy} secondary onClick={() => runAction(connect)}>RETRY TELEGRAM SIGN IN</ActionButton>
+        {import.meta.env.DEV && development && <details><summary>Development sign in</summary><label>Signed Telegram initData<textarea value={initData} onChange={e => setInitData(e.target.value)} /></label><ActionButton disabled={busy || !initData} onClick={() => runAction(() => authenticate(initData))}>SIGN IN</ActionButton></details>}
+      </section>
+      : <>
+        {screen === "team" ? <TeamScreen team={team ?? null} members={members} invitation={invitation} name={name} setName={setName} busy={busy} shareLink={shareLink}
+          userId={me.user.id} cancelInvite={() => setInvitation(null)} quests={() => navigate("quests")}
+          create={() => runAction(() => updateTeam(() => request("/teams", { name })))}
+          join={() => invitation && runAction(() => updateTeam(() => request(`/invites/${invitation.code}/join`, {}), invitation.team.id))}
+          invite={() => runAction(invite)} copy={() => runAction(async () => { await navigator.clipboard.writeText(shareLink); })} refresh={() => runAction(async () => { await refresh(); })} />
+          : screen === "home" ? <HomeScreen me={me} quests={quests} ranking={ranking} busy={busy} questLoading={questLoading} questError={questError} reload={() => runAction(loadQuests)} play={quest => runAction(() => play(quest))} team={() => navigate("team")} ranks={() => navigate("leaderboard")} />
+          : screen === "quests" ? <><QuestsScreen quests={quests} busy={busy} team={team ?? null} seasonName={me.season?.name ?? null} seasonXp={ranking?.current_user_team_xp ?? null} teamScreen={() => navigate("team")} open={quest => runAction(() => openQuest(quest))} />{questError && <ErrorNotice>{questError}<ActionButton secondary disabled={busy} onClick={() => runAction(loadQuests)}>RETRY QUESTS</ActionButton></ErrorNotice>}</>
+          : screen === "quest" && selected ? <QuestScreen header={<QuestDetailHeader busy={busy} back={() => navigate("quests")} home={() => navigate("home")} />} quest={selected} questCount={quests?.length ?? 0} team={team} teamActive={team?.status === "active"} busy={busy} stage={stage} sample={sample} sampleAge={sample ? checkInAge(sample.checkedAt, sampleNow) : null} development={import.meta.env.DEV && development} coordinates={coordinates} setCoordinates={setCoordinates}
+            feedback={feedback} dismiss={() => { if (!busyRef.current) setCheckInError(null); }}
+            start={() => runAction(() => play(selected))} checkIn={() => { void action(checkIn, selected.id); }} devCheckIn={() => { void action(async () => { setSample(null); await complete(coordinates); }, selected.id); }}
+            settings={feedback?.locationAccessIssue && locationSettingsAvailable ? locationSettings : undefined} back={() => navigate("quests")} />
+          : screen === "complete" && selected && team ? <CompleteScreen cityName={me.city.name} quest={selected} awarded={awarded} team={team} ranking={ranking} busy={busy} ranks={() => navigate("leaderboard")} crew={() => navigate("team")} />
+          : screen === "leaderboard" ? <RanksScreen ranking={ranking} teamId={team?.id} busy={busy} refresh={() => runAction(async () => { await refresh(); })} /> : null}
+        {!detailScreen && <BottomNav screen={screen} busy={busy} navigate={navigate} />}
+      </>}
+    <footer>AYLOOR · PLAY THE REAL WORLD.</footer>
+    {import.meta.env.DEV && new URLSearchParams(location.search).get("motion_debug") === "1" && <MotionDiagnostics />}
+  </main>;
 }

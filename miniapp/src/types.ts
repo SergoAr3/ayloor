@@ -34,6 +34,9 @@ export interface Quest {
   id: string;
   title: string;
   description: string;
+  look_for_hint?: string | null;
+  hero_image_url?: string | null;
+  place_label?: string | null;
   base_xp: number;
   latitude: number | null;
   longitude: number | null;
@@ -54,6 +57,8 @@ export interface Coordinates {
 export interface LocationManager {
   isInited: boolean;
   isLocationAvailable: boolean;
+  isAccessRequested?: boolean;
+  isAccessGranted?: boolean;
   init(callback: () => void): void;
   getLocation(
     callback: (
@@ -64,7 +69,7 @@ export interface LocationManager {
         | null,
     ) => void,
   ): void;
-  openSettings(): void;
+  openSettings?: () => void;
 }
 export interface WebApp {
   initData: string;
@@ -73,6 +78,8 @@ export interface WebApp {
   expand(): void;
   isVersionAtLeast(version: string): boolean;
   openTelegramLink(url: string): void;
+  onEvent?(event: "locationManagerUpdated", callback: () => void): void;
+  offEvent?(event: "locationManagerUpdated", callback: () => void): void;
   LocationManager?: LocationManager;
 }
 declare global {
