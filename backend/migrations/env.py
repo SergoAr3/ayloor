@@ -21,7 +21,9 @@ def run_migrations(connection):
 
 
 async def online():
-    engine = create_async_engine(get_settings().database_url, poolclass=pool.NullPool)
+    engine = create_async_engine(
+        get_settings().database_url, poolclass=pool.NullPool, hide_parameters=True
+    )
     async with engine.connect() as connection:
         await connection.run_sync(run_migrations)
     await engine.dispose()

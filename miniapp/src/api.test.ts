@@ -12,6 +12,21 @@ beforeEach(() => {
 });
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
+});
+
+it("routes production auth and gameplay to the explicit HTTPS API origin", async () => {
+  vi.stubEnv("PROD", true);
+  vi.stubEnv("VITE_API_BASE_URL", "https://backend.example.org/");
+  const fetcher = vi.fn().mockImplementation(() => Promise.resolve(new Response("{}")));
+  vi.stubGlobal("fetch", fetcher);
+  const { api } = await import("./api");
+  await api("/auth/telegram", { init_data: "synthetic-init-data" });
+  await api("/quest-runs/run/check-in", { latitude: 0, longitude: 0, horizontal_accuracy: 25 });
+  expect(fetcher.mock.calls.map(call => call[0])).toEqual([
+    "https://backend.example.org/api/v1/auth/telegram",
+    "https://backend.example.org/api/v1/quest-runs/run/check-in",
+  ]);
 });
 
 describe("API error classification", () => {
