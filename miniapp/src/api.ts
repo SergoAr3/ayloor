@@ -1,6 +1,7 @@
 import { ApiError, ApiTransportError } from "./apiErrors";
+import { apiBase } from "./apiBase";
 
-const base = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/$/, "");
+const base = apiBase(import.meta.env.VITE_API_BASE_URL, import.meta.env.PROD);
 let accessToken = sessionStorage.getItem("ayloor-token") || "";
 
 export function setToken(token: string) {

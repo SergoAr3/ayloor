@@ -29,7 +29,7 @@ backend/
     services/       команды, invites, quests, GPS, leaderboard
     main.py         FastAPI
     seed.py         idempotent seed CLI
-  migrations/       Alembic revision 0001
+  migrations/       Alembic revisions 0001 → 0002
   tests/            PostgreSQL integration и business tests
 bot/app/            пакет ayloor_bot: /start + WebApp-кнопка, без FSM
 bot/tests/          stateless URL handoff и handlers без запросов Telegram
@@ -62,7 +62,8 @@ cd ..
 ```
 
 Заполните `.env` по таблице ниже. Backend и bot читают корневой `.env` независимо
-от рабочей директории. Vite читает из него только публичные `VITE_*` значения;
+от рабочей директории в development/test. При `ENVIRONMENT=production` secrets/config
+приходят из environment, dotenv fallback отключён. Vite читает только публичные `VITE_*` значения;
 server-side config использует URL Mini App для точечного allowlist tunnel hostname.
 Изменение `.env` требует перезапуска соответствующего процесса.
 
@@ -79,7 +80,7 @@ tests) для локального окружения; `miniapp/package-lock.jso
 | `POSTGRES_PASSWORD` | Собственный пароль; `ayloor-local-only` из примера допустим только локально. |
 | `POSTGRES_DB` | Имя приложения, например `ayloor`. |
 | `POSTGRES_PORT` | Свободный локальный порт, по умолчанию `5432`. |
-| `DATABASE_URL` | `postgresql+asyncpg://USER:PASSWORD@localhost:PORT/DB`; согласовать с PostgreSQL. Спецсимволы в пароле URL-encode. |
+| `DATABASE_URL` | Локально `postgresql+asyncpg://USER:PASSWORD@localhost:PORT/DB`; Railway `postgresql://` / `postgres://` нормализуются в asyncpg. Спецсимволы в пароле URL-encode. |
 | `TEST_DATABASE_URL` | Отдельная одноразовая БД с суффиксом `_test`, например `ayloor_test`; никогда не БД приложения. |
 | `TELEGRAM_BOT_TOKEN` | Реальный token от @BotFather, только backend/bot. |
 | `TELEGRAM_BOT_USERNAME` | Username бота без `@`, нужен для invite links. |
@@ -90,8 +91,8 @@ tests) для локального окружения; `miniapp/package-lock.jso
 | `TELEGRAM_INIT_DATA_MAX_AGE_SECONDS` | Допустимый возраст initData, по умолчанию `3600`; будущие timestamp ограничены 30 секундами. |
 | `MAX_ACCEPTABLE_GPS_ACCURACY_M` | Максимальная погрешность GPS, development default `150` метров. |
 | `ADMIN_TELEGRAM_IDS` | Ваши положительные Telegram user IDs через запятую, например `123456789,987654321`. Пустое значение запрещает весь admin-доступ. |
-| `CORS_ORIGINS` | Разрешённые frontend origins через запятую. Локально `http://localhost:5173`; при отдельном публичном frontend добавьте его HTTPS origin. |
-| `VITE_API_BASE_URL` | Локально оставить пустым: `/api` идёт через Vite proxy на `127.0.0.1:8000`. При раздельном production hosting — публичный HTTPS origin backend без `/api/v1`. |
+| `CORS_ORIGINS` | Локально `http://localhost:5173`; production требует ровно HTTPS origin `TELEGRAM_WEBAPP_URL`, без wildcard. |
+| `VITE_API_BASE_URL` | Локально пусто: Vite `/api` proxy. Production build требует публичный HTTPS origin backend без `/api/v1`, credentials, query или fragment; localhost/private Railway DNS отклоняются. |
 
 Не помещайте token, JWT secret или DB URL в `VITE_*`. `.env` игнорируется Git.
 `CORS_ORIGINS` не является авторизацией: каждый игровой endpoint проверяет JWT.
@@ -182,14 +183,16 @@ Readiness: `GET http://127.0.0.1:8000/health` проверяет соедине�
 
 ```bash
 cd miniapp
-npm run build
+VITE_API_BASE_URL=https://YOUR-BACKEND-DOMAIN npm run build
 ```
 
-Публикуйте `miniapp/dist` через HTTPS static hosting. При пустом `VITE_API_BASE_URL`
-ваш reverse proxy должен направлять `/api` на FastAPI; dev proxy в build не входит.
-Это задача локального MVP, автоматического deployment нет. Не публикуйте Vite dev
-server как production. В production установите `ENVIRONMENT=production`, реальный
-JWT secret, token и HTTPS URLs, исключите dev harness и ограничьте доступ к БД.
+Production frontend использует explicit HTTPS API origin; пустой/ошибочный
+`VITE_API_BASE_URL` останавливает build. Dev proxy в build не входит. Публикуйте
+`miniapp/dist` через HTTPS static hosting; изменение API origin требует rebuild.
+Для Railway подготовлены native Railpack recipes и
+[операторский deployment runbook](docs/RAILWAY_BETA_RUNBOOK.md): PostgreSQL, backend,
+один polling bot и static Mini App. Railway resources и реальный production smoke
+выполняются оператором. Не публикуйте Vite dev server как production.
 
 ## Создание Telegram bot и HTTPS Mini App URL
 
@@ -383,7 +386,7 @@ docker compose up -d --wait
 .venv/bin/alembic -c backend/alembic.ini check
 cd miniapp
 npm test
-npm run build
+VITE_API_BASE_URL=https://YOUR-BACKEND-DOMAIN npm run build
 ```
 
 `prepare_test_db.py` читает `.env` (fallback `.env.example`), создаёт отдельную test
