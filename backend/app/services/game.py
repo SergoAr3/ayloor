@@ -252,6 +252,13 @@ async def quest_output(db: AsyncSession, quest: Quest, user: User) -> QuestOut:
             )
         )
     )
+    field_state = {}
+    if quest.field_test_step is not None:
+        from app.services import field_test
+
+        field_state = await field_test.quest_state(
+            db, quest, run, member.team_id if member else None
+        )
     return QuestOut(
         id=quest.id,
         title=quest.title,
@@ -266,6 +273,7 @@ async def quest_output(db: AsyncSession, quest: Quest, user: User) -> QuestOut:
         starts_at=quest.starts_at,
         expires_at=quest.expires_at,
         run=RunOut.model_validate(run) if run else None,
+        **field_state,
     )
 
 
@@ -285,7 +293,7 @@ async def available_quests(db: AsyncSession, city: City) -> list[Quest]:
             Quest.quest_type == QuestType.location,
             Quest.verification_level == VerificationLevel.system,
         )
-        .order_by(Quest.created_at, Quest.id)
+        .order_by(Quest.field_test_step.asc().nulls_last(), Quest.created_at, Quest.id)
     )
     quests = list((await db.scalars(query)).all())
     if db.info.get("production", False):
@@ -303,6 +311,10 @@ async def start_quest(db: AsyncSession, user: User, quest_id: UUID) -> RunOut:
     team = await require_member_team(db, user.id, member.team_id, lock=True)
     quest = await lock_row(db, Quest, quest.id)
     await validate_quest(db, quest, team)
+    if quest.field_test_step is not None:
+        from app.services import field_test
+
+        await field_test.require_next(db, quest, team)
     if await db.scalar(
         select(QuestRun.id).where(QuestRun.team_id == team.id, QuestRun.quest_id == quest.id)
     ):
@@ -334,6 +346,14 @@ async def check_in(
     if run.status != RunStatus.started:
         raise HTTPException(409, "Quest run is not started")
     season = await validate_quest(db, quest, team)
+    if quest.field_test_step is not None:
+        from app.services import field_test
+
+        await field_test.require_next(db, quest, team)
+        if run.gps_verified_at is not None:
+            return CompletionOut(
+                run=RunOut.model_validate(run), awarded_xp=0, already_completed=False
+            )
     if data.horizontal_accuracy > settings.max_acceptable_gps_accuracy_m:
         raise HTTPException(422, "GPS accuracy is too low; retry with a clearer view of the sky")
     distance = haversine_m(
@@ -349,9 +369,13 @@ async def check_in(
             latitude=data.latitude,
             longitude=data.longitude,
             horizontal_accuracy=data.horizontal_accuracy,
-            status=SubmissionStatus.accepted,
+            status=SubmissionStatus.pending if quest.field_test_step else SubmissionStatus.accepted,
         )
     )
+    if quest.field_test_step is not None:
+        run.gps_verified_at = utcnow()
+        await db.flush()
+        return CompletionOut(run=RunOut.model_validate(run), awarded_xp=0, already_completed=False)
     run.status = RunStatus.completed
     run.completed_at = utcnow()
     db.add(

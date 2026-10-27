@@ -50,3 +50,8 @@
 12. После неоднозначного create/join клиент выполняет reconciliation через /me,
     включая membership-related 409. Для join подтверждается именно приглашённая
     команда. Настоящие validation errors сохраняются, мутация автоматически не повторяется.
+13. FIELD TEST 0 — явное расширение исходного GPS-only MVP: фиксированные четыре
+    шага на существующих Quest/QuestRun, серверный 90-minute timer, сохранённая GPS
+    проверка перед text answer и одноразовые penalty ScoreEvents. Обычные location
+    quests сохраняют прежний flow. Правила, cap неверных ответов и операторский
+    запуск: [FIELD_TEST_ZERO.md](FIELD_TEST_ZERO.md).

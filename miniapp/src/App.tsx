@@ -11,7 +11,9 @@ import RanksScreen from "./screens/RanksScreen";
 import { QuestsScreen } from "./screens/QuestsScreen";
 import { CompleteScreen, QuestScreen } from "./screens/QuestScreens";
 import { MotionDiagnostics } from "./components/MotionDiagnostics";
-import type { Coordinates, Invite, Me, Member, Quest, Ranking, Run } from "./types";
+import { FieldTestStatus } from "./components/FieldTestStatus";
+import { FieldAnswer } from "./components/FieldAnswer";
+import type { Coordinates, FieldAction, FieldTest, Invite, Me, Member, Quest, Ranking, Run } from "./types";
 
 const tg = window.Telegram?.WebApp;
 const inviteCode = getInviteCode(location.search, tg?.initDataUnsafe?.start_param);
@@ -26,6 +28,8 @@ export default function App() {
   const [questError, setQuestError] = useState("");
   const [selected, setSelected] = useState<Quest | null>(null);
   const [ranking, setRanking] = useState<Ranking | null>(null);
+  const [field, setField] = useState<FieldTest | null>(null);
+  const [fieldFeedback, setFieldFeedback] = useState("");
   const [members, setMembers] = useState<Member[]>([]);
   const [invitation, setInvitation] = useState<Invite | null>(null);
   const [shareLink, setShareLink] = useState("");
@@ -38,6 +42,7 @@ export default function App() {
   const busyRef = useRef(false);
   // An in-flight success from a previous session must never restore gameplay after 401.
   const sessionEpoch = useRef(0);
+  const gameplayEpoch = useRef(0);
   const teamId = useRef<string | undefined>(undefined);
   const questRequest = useRef(0);
   const [loading, setLoading] = useState(true);
@@ -86,6 +91,7 @@ export default function App() {
   const action = useCallback(async (work: () => Promise<void>, checkInQuestId?: string) => {
     if (busyRef.current) return;
     const epoch = sessionEpoch.current;
+    gameplayEpoch.current++;
     busyRef.current = true;
     setBusy(true);
     setError("");
@@ -122,21 +128,23 @@ export default function App() {
     if (teamId.current !== current.team?.id) {
       if (teamId.current) setScreen("team");
       setCheckInError(null);
-      setRanking(null); setMembers([]); setShareLink(""); setSelected(null); setSample(null);
+      setRanking(null); setField(null); setFieldFeedback(""); setMembers([]); setShareLink(""); setSelected(null); setSample(null);
     }
     teamId.current = current.team?.id;
     setMe(current);
     setRefreshError("");
     // Auxiliary data must not prevent /me from confirming membership.
-    const [board, people] = await Promise.allSettled([
+    const [board, people, route] = await Promise.allSettled([
       request<Ranking>("/leaderboard"),
       current.team ? request<Member[]>(`/teams/${current.team.id}/members`) : Promise.resolve([] as Member[]),
+      request<FieldTest | null>("/field-test-zero"),
     ]);
     if (epoch !== sessionEpoch.current || teamId.current !== current.team?.id) throw new Error(sessionMessage);
     if (board.status === "fulfilled") setRanking(board.value);
     if (people.status === "fulfilled") setMembers(people.value);
-    const failures = [board, people].filter(result => result.status === "rejected");
-    if (failures.length) setRefreshError("Team or leaderboard refresh failed. Previously loaded data may be out of date. Please retry.");
+    if (route.status === "fulfilled") setField(route.value);
+    const failures = [board, people, route].filter(result => result.status === "rejected");
+    if (failures.length) setRefreshError("Team, run or leaderboard refresh failed. Previously loaded data may be out of date. Please retry.");
     return current;
   }, [request]);
 
@@ -164,7 +172,7 @@ export default function App() {
       sessionEpoch.current++;
       questRequest.current++;
       teamId.current = undefined;
-      setMe(null); setQuests(null); setSelected(null); setRanking(null); setMembers([]);
+      setMe(null); setQuests(null); setSelected(null); setRanking(null); setField(null); setFieldFeedback(""); setMembers([]);
       setInvitation(null); setShareLink(""); setSample(null); setAwarded(null);
       setCheckInError(null);
       setQuestError(""); setRefreshError(""); setQuestLoading(false); setScreen("home");
@@ -200,6 +208,29 @@ export default function App() {
     return () => window.clearInterval(id);
   }, [me?.team?.id, me?.team?.status, refresh]);
 
+  // Read shared team state after phone suspension and during a live run.
+  // No GPS requests or mutation retries occur here.
+  useEffect(() => {
+    if (!me || !field) return;
+    const reconcile = async () => {
+      if (document.hidden || busyRef.current) return;
+      const version = gameplayEpoch.current, epoch = sessionEpoch.current;
+      try {
+        const [route, list, detail] = await Promise.all([
+          request<FieldTest | null>("/field-test-zero"), request<Quest[]>("/quests"),
+          selected?.id ? request<Quest>(`/quests/${selected.id}`) : Promise.resolve(null),
+        ]);
+        if (busyRef.current || version !== gameplayEpoch.current || epoch !== sessionEpoch.current) return;
+        setField(route); setQuests(list);
+        if (detail) setSelected(previous => previous?.id === detail.id ? detail : previous);
+      } catch (e) { if (epoch === sessionEpoch.current) setRefreshError(message(e)); }
+    };
+    const resume = () => { if (!document.hidden) void reconcile(); };
+    document.addEventListener("visibilitychange", resume);
+    const timer = field.status === "running" ? window.setInterval(() => { void reconcile(); }, 15000) : undefined;
+    return () => { document.removeEventListener("visibilitychange", resume); window.clearInterval(timer); };
+  }, [me?.user.id, field?.status, selected?.id, request]);
+
   function navigate(next: Screen) {
     if (busyRef.current) return;
     setScreen(next);
@@ -226,6 +257,7 @@ export default function App() {
   async function openQuest(quest: Quest) {
     const detail = await request<Quest>(`/quests/${quest.id}`);
     setSample(null); // A reopened quest must not present an old fix as current.
+    setFieldFeedback("");
     rememberQuest(detail);
     setScreen("quest"); window.scrollTo({ top: 0 });
   }
@@ -238,7 +270,8 @@ export default function App() {
       () => request<Run>(`/quests/${detail.id}/start`, {}),
       () => request<Quest>(`/quests/${detail.id}`),
     );
-    rememberQuest({ ...detail, run }); setScreen("quest"); window.scrollTo({ top: 0 });
+    rememberQuest({ ...detail, run }); setFieldFeedback(""); setScreen("quest"); window.scrollTo({ top: 0 });
+    if (detail.field_test_step) await refresh();
   }
 
   function confirmed(quest: Quest, amount: number | null) {
@@ -254,14 +287,48 @@ export default function App() {
     setStage("verification");
     try {
       const result = await request<{ run: Run; awarded_xp: number }>(`/quest-runs/${selected.run.id}/check-in`, data);
+      if (selected.field_test_step && result.run.status !== "completed") {
+        rememberQuest({ ...selected, run: result.run });
+        setFieldFeedback("GPS verified. Enter your test code to complete this quest.");
+        setStage(""); return;
+      }
       confirmed({ ...selected, run: result.run }, result.awarded_xp);
     } catch (e) {
       if (!(e instanceof ApiTransportError)) throw e;
       let detail: Quest;
       try { detail = await request<Quest>(`/quests/${selected.id}`); } catch { throw e; }
+      if (detail.field_test_step && detail.run?.gps_verified_at && detail.run.status === "started") {
+        rememberQuest(detail); setStage(""); setFieldFeedback("GPS verification confirmed after reconnect. Enter your code."); return;
+      }
       if (detail.run?.status !== "completed") throw e;
       confirmed(detail, null);
     }
+  }
+
+  async function fieldAction(kind: "answer" | "hint", text?: string) {
+    if (!selected?.run) return;
+    setFieldFeedback("");
+    try {
+      const result = await request<FieldAction>(`/quest-runs/${selected.run.id}/${kind}`, kind === "answer" ? { answer: text } : {});
+      rememberQuest(result.quest);
+      if (result.quest.run?.status === "completed") confirmed(result.quest, result.awarded_xp);
+      else setFieldFeedback(kind === "hint"
+        ? result.penalty_xp ? "Hint revealed · −50 XP." : "Hint already revealed. No additional XP charged."
+        : result.penalty_xp ? "Wrong answer · −25 XP. Try another code." : "Wrong answer. No additional penalty; try another code.");
+    } catch (e) {
+      if (!(e instanceof ApiTransportError)) {
+        void refresh().catch(error => setRefreshError(message(error)));
+        throw e;
+      }
+      let detail: Quest;
+      try { detail = await request<Quest>(`/quests/${selected.id}`); } catch { throw e; }
+      rememberQuest(detail);
+      if (detail.run?.status === "completed") confirmed(detail, null);
+      else if (kind === "hint" && detail.hint_used) setFieldFeedback("Hint confirmed after reconnect · −50 XP charged once.");
+      else if (kind === "answer" && detail.wrong_answer_penalized) setFieldFeedback("Answer response lost. A −25 XP penalty is recorded for this quest; retries cannot charge it again. Check your code and retry.");
+      else throw e;
+    }
+    await refresh(); await loadQuests();
   }
 
   async function checkIn() {
@@ -296,6 +363,10 @@ export default function App() {
   const detailScreen = !!(me && selected && screen === "quest");
   const header = <AppHeader busy={busy} showTicker={screen === "home" || screen === "quests"} home={() => me ? navigate("home") : setScreen("home")} />;
   const feedback = selected && checkInError?.questId === selected.id ? checkInFeedback(checkInError.message) : null;
+  // A summary can confirm expiry before the selected detail is refreshed.
+  const displayedQuest = selected?.field_test_step && field?.status === "expired" && selected.run?.status !== "completed"
+    ? { ...selected, locked: true } : selected;
+  const fieldStatus = field ? <FieldTestStatus field={field} busy={busy} refresh={() => runAction(async () => { await refresh(); await loadQuests(); if (selected) rememberQuest(await request<Quest>(`/quests/${selected.id}`)); })} /> : undefined;
   return <main className={`app${screen === "home" ? " home-page" : ""}${detailScreen ? " quest-detail-screen" : ""}${focused ? " focused-screen" : ""}${screen === "quest" && feedback ? " result-screen" : ""}${me && selected && screen === "complete" ? " reward-screen" : ""}`}>
     {me && selected && screen === "complete" && <div className="reward-halftone" aria-hidden="true" />}
     {!detailScreen && header}
@@ -307,6 +378,7 @@ export default function App() {
         {import.meta.env.DEV && development && <details><summary>Development sign in</summary><label>Signed Telegram initData<textarea value={initData} onChange={e => setInitData(e.target.value)} /></label><ActionButton disabled={busy || !initData} onClick={() => runAction(() => authenticate(initData))}>SIGN IN</ActionButton></details>}
       </section>
       : <>
+        {(screen === "home" || screen === "quests") && fieldStatus}
         {screen === "team" ? <TeamScreen team={team ?? null} members={members} invitation={invitation} name={name} setName={setName} busy={busy} shareLink={shareLink}
           userId={me.user.id} cancelInvite={() => setInvitation(null)} quests={() => navigate("quests")}
           create={() => runAction(() => updateTeam(() => request("/teams", { name })))}
@@ -314,11 +386,11 @@ export default function App() {
           invite={() => runAction(invite)} copy={() => runAction(async () => { await navigator.clipboard.writeText(shareLink); })} refresh={() => runAction(async () => { await refresh(); })} />
           : screen === "home" ? <HomeScreen me={me} quests={quests} ranking={ranking} busy={busy} questLoading={questLoading} questError={questError} reload={() => runAction(loadQuests)} play={quest => runAction(() => play(quest))} team={() => navigate("team")} ranks={() => navigate("leaderboard")} />
           : screen === "quests" ? <><QuestsScreen quests={quests} busy={busy} team={team ?? null} seasonName={me.season?.name ?? null} seasonXp={ranking?.current_user_team_xp ?? null} teamScreen={() => navigate("team")} open={quest => runAction(() => openQuest(quest))} />{questError && <ErrorNotice>{questError}<ActionButton secondary disabled={busy} onClick={() => runAction(loadQuests)}>RETRY QUESTS</ActionButton></ErrorNotice>}</>
-          : screen === "quest" && selected ? <QuestScreen header={<QuestDetailHeader busy={busy} back={() => navigate("quests")} home={() => navigate("home")} />} quest={selected} questCount={quests?.length ?? 0} team={team} teamActive={team?.status === "active"} busy={busy} stage={stage} sample={sample} sampleAge={sample ? checkInAge(sample.checkedAt, sampleNow) : null} development={import.meta.env.DEV && development} coordinates={coordinates} setCoordinates={setCoordinates}
+          : screen === "quest" && selected ? <QuestScreen fieldStatus={selected.field_test_step ? fieldStatus : undefined} fieldAnswer={selected.field_test_step && selected.run && selected.run.status !== "completed" && team?.status === "active" ? <FieldAnswer key={selected.id} quest={displayedQuest!} busy={busy} feedback={fieldFeedback} answer={text => runAction(() => fieldAction("answer", text))} hint={() => runAction(() => fieldAction("hint"))} /> : undefined} header={<QuestDetailHeader busy={busy} back={() => navigate("quests")} home={() => navigate("home")} />} quest={displayedQuest!} questCount={quests?.length ?? 0} team={team} teamActive={team?.status === "active"} busy={busy} stage={stage} sample={sample} sampleAge={sample ? checkInAge(sample.checkedAt, sampleNow) : null} development={import.meta.env.DEV && development} coordinates={coordinates} setCoordinates={setCoordinates}
             feedback={feedback} dismiss={() => { if (!busyRef.current) setCheckInError(null); }}
             start={() => runAction(() => play(selected))} checkIn={() => { void action(checkIn, selected.id); }} devCheckIn={() => { void action(async () => { setSample(null); await complete(coordinates); }, selected.id); }}
             settings={feedback?.locationAccessIssue && locationSettingsAvailable ? locationSettings : undefined} back={() => navigate("quests")} />
-          : screen === "complete" && selected && team ? <CompleteScreen cityName={me.city.name} quest={selected} awarded={awarded} team={team} ranking={ranking} busy={busy} ranks={() => navigate("leaderboard")} crew={() => navigate("team")} />
+          : screen === "complete" && selected && team ? <CompleteScreen fieldStatus={selected.field_test_step ? fieldStatus : undefined} next={selected.field_test_step && selected.field_test_step < 4 ? () => navigate("quests") : undefined} cityName={me.city.name} quest={selected} awarded={awarded} team={team} ranking={ranking} busy={busy} ranks={() => navigate("leaderboard")} crew={() => navigate("team")} />
           : screen === "leaderboard" ? <RanksScreen ranking={ranking} teamId={team?.id} busy={busy} refresh={() => runAction(async () => { await refresh(); })} /> : null}
         {!detailScreen && <BottomNav screen={screen} busy={busy} navigate={navigate} />}
       </>}

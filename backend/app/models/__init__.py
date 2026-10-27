@@ -188,8 +188,16 @@ class Quest(Identity, Created, Updated, Base):
             name="quest_interval",
         ),
         CheckConstraint(
-            "quest_type != 'location' OR (latitude IS NOT NULL AND longitude IS NOT NULL AND radius_m IS NOT NULL)",
+            "quest_type != 'location' OR field_test_step IS NOT NULL OR "
+            "(latitude IS NOT NULL AND longitude IS NOT NULL AND radius_m IS NOT NULL)",
             name="location_checkpoint",
+        ),
+        UniqueConstraint("season_id", "field_test_step", name="uq_field_test_step"),
+        CheckConstraint("field_test_step BETWEEN 1 AND 4", name="field_test_step_range"),
+        CheckConstraint(
+            "field_test_step IS NULL OR "
+            "(season_id IS NOT NULL AND base_xp = 250 AND answer_text IS NOT NULL)",
+            name="field_test_config",
         ),
     )
     city_id: Mapped[UUID] = mapped_column(ForeignKey("cities.id"), index=True)
@@ -212,6 +220,10 @@ class Quest(Identity, Created, Updated, Base):
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     rules_json: Mapped[dict | None] = mapped_column(JSONB)
+    field_test_step: Mapped[int | None] = mapped_column(Integer)
+    # Private solution and paid hint: never included in ordinary QuestOut.
+    answer_text: Mapped[str | None] = mapped_column(String(200))
+    answer_hint: Mapped[str | None] = mapped_column(String(1000))
 
 
 class QuestRun(Identity, Base):
@@ -228,6 +240,7 @@ class QuestRun(Identity, Base):
     status: Mapped[RunStatus] = mapped_column(Enum(RunStatus), default=RunStatus.started)
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    gps_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class Submission(Identity, Created, Base):
@@ -264,7 +277,24 @@ class ScoreEvent(Identity, Created, Base):
             unique=True,
             postgresql_where=text("reason = 'quest_completion'"),
         ),
-        CheckConstraint("reason IN ('quest_completion', 'admin_adjustment')", name="score_reason"),
+        Index(
+            "uq_penalty_score_run_reason",
+            "quest_run_id",
+            "reason",
+            unique=True,
+            postgresql_where=text("reason IN ('hint_penalty', 'wrong_answer_penalty')"),
+        ),
+        CheckConstraint(
+            "reason IN ('quest_completion', 'admin_adjustment', 'hint_penalty', 'wrong_answer_penalty')",
+            name="score_reason",
+        ),
+        CheckConstraint(
+            "reason NOT IN ('hint_penalty', 'wrong_answer_penalty') OR "
+            "(quest_run_id IS NOT NULL AND "
+            "((reason = 'hint_penalty' AND amount = -50) OR "
+            "(reason = 'wrong_answer_penalty' AND amount = -25)))",
+            name="penalty_requires_run",
+        ),
         CheckConstraint(
             "reason != 'quest_completion' OR (quest_run_id IS NOT NULL AND amount > 0)",
             name="completion_requires_run",

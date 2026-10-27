@@ -7,8 +7,10 @@ import { ActionButton, ArrowIcon } from "../components/ui";
 import { formatCheckInDistance, mapsLink, outsideZoneMeters, type CheckInFeedback } from "../questState";
 import type { Coordinates, Quest, Ranking, Team } from "../types";
 
-export function QuestScreen({ header, quest, questCount = 0, team, teamActive, busy, stage, feedback, sample, sampleAge = "JUST NOW", development, coordinates, setCoordinates, start, checkIn, devCheckIn, settings, dismiss, back }: {
+export function QuestScreen({ header, fieldStatus, fieldAnswer, quest, questCount = 0, team, teamActive, busy, stage, feedback, sample, sampleAge = "JUST NOW", development, coordinates, setCoordinates, start, checkIn, devCheckIn, settings, dismiss, back }: {
   header?: ReactNode;
+  fieldStatus?: ReactNode;
+  fieldAnswer?: ReactNode;
   team?: Team | null;
   questCount?: number;
   quest: Quest; teamActive: boolean; busy: boolean; stage: "" | "location" | "verification";
@@ -19,8 +21,9 @@ export function QuestScreen({ header, quest, questCount = 0, team, teamActive, b
   dismiss?: () => void; settings?: () => void; back: () => void;
 }) {
   const done = quest.run?.status === "completed";
-  const failed = quest.run?.status === "failed";
+  const failed = quest.run?.status === "failed" || !!quest.locked;
   const active = quest.run?.status === "started";
+  const awaitingAnswer = !!quest.field_test_step && !!quest.run?.gps_verified_at;
   const questSample = active && sampleAge && sample?.questId === quest.id ? sample.data : null;
   const fix = questSample ? zoneFix(quest, questSample) : null;
   const outside = feedback?.title === "OUTSIDE CHECK-IN ZONE";
@@ -38,9 +41,9 @@ export function QuestScreen({ header, quest, questCount = 0, team, teamActive, b
     const observer = new ResizeObserver(measure);
     if (bar) observer.observe(bar, { box: "border-box" });
     return () => observer.disconnect();
-  }, [active, done, failed, teamActive]);
+  }, [active, done, failed, teamActive, awaitingAnswer]);
   useEffect(() => {
-    if (!feedback || busy || stage) return;
+    if (!feedback || busy || stage || failed || done || !active || awaitingAnswer) return;
     const background = Array.from(document.querySelectorAll<HTMLElement>(".quest-scroll, .brand, .app > nav"));
     background.forEach(el => { el.inert = true; });
     dialog.current?.querySelector<HTMLButtonElement>(".result-close")?.focus({ preventScroll: true });
@@ -59,7 +62,7 @@ export function QuestScreen({ header, quest, questCount = 0, team, teamActive, b
     for (const el of [scroll, content, dock.current]) if (el) observer.observe(el, { box: "border-box" });
     reveal();
     return () => { cancelAnimationFrame(frame); observer.disconnect(); background.forEach(el => { el.inert = false; }); };
-  }, [feedback?.title, feedback?.description, busy, stage, questCount]);
+  }, [feedback?.title, feedback?.description, busy, stage, questCount, failed, done, active, awaitingAnswer]);
   function closeResult() {
     if (busy || stage || !dismiss) return;
     dismiss();
@@ -77,9 +80,10 @@ export function QuestScreen({ header, quest, questCount = 0, team, teamActive, b
   return <div ref={detail} className={`focused-view quest-detail${done ? " quest-record" : !failed ? " compact-quest-hero" : ""}${feedback && active ? " has-result" : ""}`} role={done ? "region" : undefined} aria-label={done ? "Quest completion" : undefined}>
     <div className="quest-scroll">
       {header}
+      {fieldStatus}
       <section className="quest-heading">
         {!header && <button className="back quest-back" onClick={back} disabled={busy}><ArrowIcon direction="left" />ALL QUESTS</button>}
-        <p className={`eyebrow quest-state${active ? " active" : done ? " confirmed" : ""}`}>{active && !stage && <span className="quest-live-beacon" aria-hidden="true"><span className="status-dot" /><span className="quest-idle-ring" /></span>}{done ? "QUEST COMPLETE ✓" : active ? "QUEST ACTIVE" : "LOCATION QUEST"}</p>
+        <p className={`eyebrow quest-state${active ? " active" : done ? " confirmed" : ""}`}>{active && !stage && !failed && <span className="quest-live-beacon" aria-hidden="true"><span className="status-dot" /><span className="quest-idle-ring" /></span>}{done ? "QUEST COMPLETE ✓" : quest.locked ? "LOCKED / UP NEXT" : active ? "QUEST ACTIVE" : "LOCATION QUEST"}</p>
         <QuestTitle key={quest.id} title={quest.title} />
         <p className="quest-facts"><span>TEAM QUEST</span><span>{quest.radius_m != null ? `${quest.radius_m} M RADIUS` : "CHECKPOINT NOT CONFIGURED"}</span><span className="quest-reward">+{quest.base_xp} XP</span></p>
       </section>
@@ -87,19 +91,21 @@ export function QuestScreen({ header, quest, questCount = 0, team, teamActive, b
       {!done && !failed && <ol className="quest-check-in-steps" aria-label="How to complete this quest">
         <li><strong>01</strong><span>REACH THE<br />ZONE</span></li>
         <li><strong>02</strong><span>{active ? "TAP CHECK IN" : "START QUEST"}</span></li>
-        <li><strong>03</strong><span>{active ? <>TEAM EARNS<br />+{quest.base_xp} XP</> : <>CHECK IN FOR<br />+{quest.base_xp} XP</>}</span></li>
+        <li><strong>03</strong><span>{quest.field_test_step ? <>ENTER CODE FOR<br />+{quest.base_xp} XP</> : active ? <>TEAM EARNS<br />+{quest.base_xp} XP</> : <>CHECK IN FOR<br />+{quest.base_xp} XP</>}</span></li>
       </ol>}
       {team && <div className={`quest-crew-card ${team.status}`}><span className={`status-dot ${team.status}`} aria-hidden="true" /><div><strong>{team.name} · {team.member_count} / 5</strong><span>{done ? "CHECKPOINT CLAIMED BY YOUR TEAM" : teamActive ? "ANY TEAMMATE CAN CHECK IN" : "GATHER AT LEAST TWO TEAMMATES"}</span></div></div>}
+      {fieldAnswer}
       <section className="quest-description">
         <div className="quest-briefing"><p className="eyebrow">BRIEFING</p><p>{quest.description}</p><p className="quest-safety"><span aria-hidden="true">!</span>Walk, don’t rush. Use crossings and public paths.</p></div>
         {done ? <p className="hint">Completion confirmed · read-only.</p>
-          : failed ? <p>This quest run is closed.</p>
+          : failed ? <p>{quest.locked ? "Complete the previous quest first. Expired runs cannot continue." : "This quest run is closed."}</p>
           : !teamActive ? <p>Gather at least two teammates to start a quest.</p> : null}
-        {active && teamActive && import.meta.env.DEV && development && <details><summary>Development coordinates</summary><p>Development input only. Server radius and accuracy verification remains enabled.</p>{(["latitude", "longitude", "horizontal_accuracy"] as const).map(key => <label key={key}>{key}<input type="number" step="any" value={coordinates[key]} onChange={e => setCoordinates({ ...coordinates, [key]: Number(e.target.value) })} /></label>)}<ActionButton disabled={busy} onClick={devCheckIn}>CHECK IN WITH DEV COORDINATES</ActionButton></details>}
+        {active && !failed && !awaitingAnswer && teamActive && import.meta.env.DEV && development && <details><summary>Development coordinates</summary><p>Development input only. Server radius and accuracy verification remains enabled.</p>{(["latitude", "longitude", "horizontal_accuracy"] as const).map(key => <label key={key}>{key}<input type="number" step="any" value={coordinates[key]} onChange={e => setCoordinates({ ...coordinates, [key]: Number(e.target.value) })} /></label>)}<ActionButton disabled={busy} onClick={devCheckIn}>CHECK IN WITH DEV COORDINATES</ActionButton></details>}
       </section>
     </div>
     {done ? <div className="quest-dock completed-actions"><ActionButton secondary arrow={false} disabled={busy} onClick={back}>BACK TO QUESTS</ActionButton></div>
       : !failed && teamActive && !quest.run ? <div className="quest-dock unstarted-actions"><ActionButton disabled={busy} onClick={start}>START QUEST</ActionButton><p className="hint">Location is requested only when you check in.</p></div>
+      : !failed && teamActive && active && awaitingAnswer ? <div className="quest-dock"><p className="hint">GPS verified by server. Enter your test code above.</p><ActionButton secondary onClick={back} disabled={busy}>BACK TO QUESTS</ActionButton></div>
       : !failed && teamActive && active ? <div ref={dock} className={`quest-dock check-in-action${feedback ? " has-feedback" : ""}`} role="region" aria-label="Quest check-in">
         <div ref={dialog} className="check-in-dialog" role={feedback ? "dialog" : undefined} aria-modal={feedback ? true : undefined} aria-label={feedback ? "Check-in result" : undefined} onKeyDown={dialogKey}>
         {feedback && <div className="check-in-feedback">{questCount > 1 && <p className="result-quest-context">{quest.title} · +{quest.base_xp} XP</p>}<div className={`result-message${farOutside ? " is-far" : ""}`} role="alert" aria-live="polite">{dismiss && !busy && !stage && <button type="button" className="result-close" aria-label="Close check-in result" onClick={closeResult}>×</button>}<strong>{farOutside ? "FAR FROM THE CHECKPOINT." : outside ? "NOT THERE YET." : `${feedback.title}.`}</strong><p>{farOutside ? `Your location was about ${formatCheckInDistance(fix!.distance).toLowerCase()} away. Open the map to find your way.` : outside && fix ? `You’re about ${formatCheckInDistance(outsideZoneMeters(fix.distance, quest.radius_m!), true).toLowerCase()} outside the check-in zone. Walk closer and try again.` : feedback.description}</p></div>{fix && <div className="result-metrics">{outside && fix.outside > 0 && <div className="outside-distance"><strong>{formatCheckInDistance(fix.distance)}</strong><span>FROM CHECKPOINT</span></div>}<div role="group" aria-label="GPS accuracy from last explicit check-in sample"><strong>±{formatCheckInDistance(fix.accuracy, true)}</strong><span>GPS SAMPLE</span></div></div>}</div>}
@@ -115,7 +121,7 @@ export function QuestScreen({ header, quest, questCount = 0, team, teamActive, b
   </div>;
 }
 
-export function CompleteScreen({ quest, awarded, team, ranking, busy, ranks, crew, cityName }: { quest: Quest; awarded: number | null; team: Team; ranking: Ranking | null; busy: boolean; ranks: () => void; crew: () => void; cityName: string }) {
+export function CompleteScreen({ quest, awarded, team, ranking, busy, ranks, crew, cityName, fieldStatus, next }: { quest: Quest; awarded: number | null; team: Team; ranking: Ranking | null; busy: boolean; ranks: () => void; crew: () => void; cityName: string; fieldStatus?: ReactNode; next?: () => void }) {
   return <div className="focused-view quest-complete-view">
     <div className="reward-backdrop" aria-hidden="true"><div className="reward-sunburst"><div className="reward-sunburst-rays" /></div></div>
     <section className="quest-scroll completion">
@@ -125,8 +131,9 @@ export function CompleteScreen({ quest, awarded, team, ranking, busy, ranks, cre
         {awarded != null && awarded > 0 ? <div className="xp">+{awarded}<span>XP</span></div> : <p className="success">{awarded === 0 ? "This quest was already completed. No new XP was awarded." : "Completion confirmed by the server. Your season score will refresh separately."}</p>}
       </div>
       <p className="completion-quest-title">{quest.title}</p>
+      {fieldStatus}
       <div className="completion-team"><div className="completion-crew"><span className="eyebrow">YOUR TEAM</span><strong>{team.name}</strong><span>{ranking?.current_user_team_xp ?? "—"} XP THIS SEASON</span></div><div className="completion-rank">{ranking?.current_user_team_rank != null ? <><strong>#{ranking.current_user_team_rank}</strong><span>{cityName}</span></> : <><strong>—</strong><span>Rank unavailable</span></>}</div></div>
     </section>
-    <div className="quest-dock completion-actions"><ActionButton disabled={busy} onClick={ranks}>VIEW LEADERBOARD</ActionButton><button className="text-action" disabled={busy} onClick={crew}>BACK TO TEAM</button></div>
+    <div className="quest-dock completion-actions">{next && <ActionButton disabled={busy} onClick={next}>NEXT QUEST UNLOCKED</ActionButton>}<ActionButton disabled={busy} onClick={ranks}>VIEW LEADERBOARD</ActionButton><button className="text-action" disabled={busy} onClick={crew}>BACK TO TEAM</button></div>
   </div>;
 }

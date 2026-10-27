@@ -5,9 +5,9 @@ export function homeHero(team: Team | null, quests: Quest[] | null) {
   if (team?.status === "pending") return { kind: "pending" } as const;
   if (!team) return { kind: "no-team" } as const;
   if (team.status !== "active") return { kind: "blocked" } as const;
-  const active = quests?.find(quest => quest.run?.status === "started");
+  const active = quests?.find(quest => quest.run?.status === "started" && !quest.locked);
   if (active) return { kind: "active", quest: active } as const;
-  const available = quests?.find(quest => !quest.run);
+  const available = quests?.find(quest => !quest.run && !quest.locked);
   if (available) return { kind: "available", quest: available } as const;
   if (quests?.length === 0) return { kind: "empty" } as const;
   if (quests?.length && quests.every(quest => quest.run?.status === "completed")) return { kind: "done" } as const;

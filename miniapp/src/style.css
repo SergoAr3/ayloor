@@ -532,3 +532,24 @@ footer { display:none; margin:30px 20px 0; text-align:center; color:var(--muted)
  .quest-check-in-steps li { padding-inline:7px; }
  .quest-check-in-steps span { letter-spacing:.4px; }
 }
+
+/* FIELD TEST 0 uses the existing Street Frequency paper/ink/lime palette. */
+.field-test-status { margin:16px 20px; padding:14px; border:2px solid var(--ink); background:var(--paper); color:var(--ink); }
+.field-test-status .eyebrow { margin:0; }
+.field-test-status .spread { flex-wrap:wrap; gap:8px; }
+.field-test-status .spread > strong { font:800 23px/1 var(--display); }
+.field-test-status p { margin:8px 0 0; font-size:13px; }
+.field-test-status .field-score { display:flex; flex-wrap:wrap; align-items:baseline; gap:8px 16px; }
+.field-score strong { font:800 28px/1 var(--display); }
+.field-score span { font:700 17px/1 var(--display); }
+.field-test-status.finished { border-width:3px; box-shadow:4px 4px 0 var(--lime); }
+.field-test-status.expired { border-color:var(--red-ink); }
+.field-test-status .text-action { margin-top:6px; text-align:left; }
+.field-answer { margin:20px; padding:16px; border:2px solid var(--ink); background:var(--paper); }
+.field-answer > p { font-size:14px; }
+.field-answer .eyebrow { font-size:12px; }
+.field-answer .field-feedback { padding:10px; background:var(--lime); border:1px solid var(--ink); }
+.field-hint,.field-hint-confirm { padding:12px; border:2px dashed var(--ink); overflow-wrap:anywhere; }
+.quest-row.locked { border-style:dashed; color:var(--muted); }
+.quest-row.locked .quest-row-end { color:var(--muted); }
+.quest-complete-view .field-test-status { margin:16px 0; }

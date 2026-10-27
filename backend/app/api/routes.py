@@ -21,11 +21,14 @@ from app.models import (
 from app.schemas.api import (
     ActiveInput,
     AdjustmentInput,
+    AnswerInput,
     AuthInput,
     AuthOut,
     CheckInInput,
     CityOut,
     CompletionOut,
+    FieldActionOut,
+    FieldTestOut,
     InviteInput,
     InviteOut,
     LeaderboardOut,
@@ -42,7 +45,7 @@ from app.schemas.api import (
     TeamOut,
     UserOut,
 )
-from app.services import game
+from app.services import field_test, game
 
 router = APIRouter(prefix="/api/v1")
 
@@ -170,6 +173,21 @@ async def check_in(
 @router.get("/leaderboard", response_model=LeaderboardOut)
 async def leaderboard(db: DB, user: CurrentUser, city: str = "yerevan") -> LeaderboardOut:
     return await game.leaderboard(db, user, await game.require_city(db, city))
+
+
+@router.get("/field-test-zero", response_model=FieldTestOut | None)
+async def field_test_summary(db: DB, user: CurrentUser, city: str = "yerevan"):
+    return await field_test.summary(db, user, await game.require_city(db, city))
+
+
+@router.post("/quest-runs/{run_id}/answer", response_model=FieldActionOut)
+async def answer(run_id: UUID, data: AnswerInput, db: DB, user: CurrentUser):
+    return await field_test.answer(db, user, run_id, data)
+
+
+@router.post("/quest-runs/{run_id}/hint", response_model=FieldActionOut)
+async def hint(run_id: UUID, db: DB, user: CurrentUser):
+    return await field_test.reveal_hint(db, user, run_id)
 
 
 @router.get("/admin/users", response_model=list[UserOut])

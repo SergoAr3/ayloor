@@ -43,6 +43,7 @@ export async function mount(page: Page, options: Options = {}) {
     if (path === "/config") return json({ development_gps_enabled: false });
     if (path === "/auth/telegram") return json({ access_token: "test-session" });
     if (path === "/me") return json(me);
+    if (path === "/field-test-zero") return json(null);
     if (path === "/leaderboard") {
       if (completed && options.refreshFailure) return json({ detail: "Board offline" }, 503);
       return json(board());

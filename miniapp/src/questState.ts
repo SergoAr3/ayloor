@@ -61,8 +61,8 @@ export async function startQuest(
 }
 
 export function currentQuest(quests: Quest[]): Quest | undefined {
-  return quests.find(q => q.run?.status === "started")
-    ?? quests.find(q => !q.run)
+  return quests.find(q => q.run?.status === "started" && !q.locked)
+    ?? quests.find(q => !q.run && !q.locked)
     ?? quests.find(q => q.run?.status === "completed")
     ?? quests[0];
 }
