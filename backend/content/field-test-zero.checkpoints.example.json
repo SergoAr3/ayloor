@@ -1,0 +1,8 @@
+{
+  "checkpoints": [
+    { "step": 1, "latitude": null, "longitude": null, "radius_m": null, "reviewed_safe": false },
+    { "step": 2, "latitude": null, "longitude": null, "radius_m": null, "reviewed_safe": false },
+    { "step": 3, "latitude": null, "longitude": null, "radius_m": null, "reviewed_safe": false },
+    { "step": 4, "latitude": null, "longitude": null, "radius_m": null, "reviewed_safe": false }
+  ]
+}

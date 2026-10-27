@@ -29,7 +29,7 @@ backend/
     services/       команды, invites, quests, GPS, leaderboard
     main.py         FastAPI
     seed.py         idempotent seed CLI
-  migrations/       Alembic revisions 0001 → 0002
+  migrations/       Alembic revisions 0001 → 0002 → 0003
   tests/            PostgreSQL integration и business tests
 bot/app/            пакет ayloor_bot: /start + WebApp-кнопка, без FSM
 bot/tests/          stateless URL handoff и handlers без запросов Telegram
@@ -248,6 +248,12 @@ membership-related 409 также вызывает reconciliation; для join �
 пользователю. Мутация автоматически не повторяется, duplicate join по-прежнему запрещён.
 
 ## Quests, GPS и privacy
+
+Опциональный **FIELD TEST 0**: четыре последовательных GPS + text-answer quests,
+90 минут, до 1000 XP, одноразовые штрафы за Hint/неверный ответ и итог маршрута.
+Setup, проверяемые координаты/радиусы и сценарий **925 XP**:
+[docs/FIELD_TEST_ZERO.md](docs/FIELD_TEST_ZERO.md). Контент устанавливается отдельно
+и выключен до явной настройки безопасных checkpoints оператором.
 
 Start разрешён только текущему участнику active team, для доступного location/system
 quest нужного города и активного по датам сезона. Уникальная пара

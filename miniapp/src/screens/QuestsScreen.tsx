@@ -3,8 +3,8 @@ import type { Quest, Team } from "../types";
 import { ArrowIcon } from "../components/ui";
 
 type Filter = "all" | "todo" | "done";
-type State = "progress" | "available" | "completed" | "closed";
-const stateOf = (quest: Quest): State => !quest.run ? "available" : quest.run.status === "started" ? "progress" : quest.run.status === "completed" ? "completed" : "closed";
+type State = "progress" | "available" | "completed" | "closed" | "locked";
+const stateOf = (quest: Quest): State => quest.run?.status === "completed" ? "completed" : quest.locked ? "locked" : !quest.run ? "available" : quest.run.status === "started" ? "progress" : "closed";
 
 export function QuestsScreen({ quests, busy, open, team, seasonXp, teamScreen }: {
   quests: Quest[] | null; busy: boolean; open: (quest: Quest) => void;
@@ -17,7 +17,7 @@ export function QuestsScreen({ quests, busy, open, team, seasonXp, teamScreen }:
   const todo = rows.filter(row => row.state === "available" || row.state === "progress").length;
   const groups: { key: State; label: string }[] = [
     { key: "progress", label: "IN PROGRESS" }, { key: "available", label: "AVAILABLE" },
-    { key: "completed", label: "COMPLETED" }, { key: "closed", label: "CLOSED" },
+    { key: "locked", label: "LOCKED / UP NEXT" }, { key: "completed", label: "COMPLETED" }, { key: "closed", label: "CLOSED" },
   ];
   const visible = rows.filter(row => filter === "all" || (filter === "done" ? row.state === "completed" : row.state === "available" || row.state === "progress"));
   return <section className="quests-screen">

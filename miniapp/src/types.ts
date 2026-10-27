@@ -29,6 +29,7 @@ export interface Member {
 export interface Run {
   id: string;
   status: "started" | "completed" | "failed";
+  gps_verified_at?: string | null;
 }
 export interface Quest {
   id: string;
@@ -42,6 +43,33 @@ export interface Quest {
   longitude: number | null;
   radius_m: number | null;
   run: Run | null;
+  field_test_step?: number | null;
+  locked?: boolean;
+  hint_available?: boolean;
+  hint_used?: boolean;
+  hint_text?: string | null;
+  wrong_answer_penalized?: boolean;
+}
+export interface FieldTest {
+  status: "ready" | "running" | "expired" | "finished";
+  server_now: string;
+  started_at: string | null;
+  deadline_at: string | null;
+  finished_at: string | null;
+  elapsed_seconds: number;
+  remaining_seconds: number;
+  score: number;
+  maximum_score: number;
+  completed_quests: number;
+  total_quests: number;
+  leaderboard_position: number | null;
+}
+export interface FieldAction {
+  quest: Quest;
+  correct: boolean | null;
+  awarded_xp: number;
+  penalty_xp: number;
+  already_applied: boolean;
 }
 export interface Ranking {
   entries: { rank: number; team_id: string; team_name: string; xp: number }[];

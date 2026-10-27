@@ -116,6 +116,7 @@ class RunOut(ORMModel):
     status: RunStatus
     started_at: datetime
     completed_at: datetime | None
+    gps_verified_at: datetime | None = None
 
 
 class QuestOut(BaseModel):
@@ -132,6 +133,39 @@ class QuestOut(BaseModel):
     starts_at: datetime | None
     expires_at: datetime | None
     run: RunOut | None
+    field_test_step: int | None = None
+    locked: bool = False
+    hint_available: bool = False
+    hint_used: bool = False
+    hint_text: str | None = None
+    wrong_answer_penalized: bool = False
+
+
+class AnswerInput(Input):
+    answer: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)]
+
+
+class FieldActionOut(BaseModel):
+    quest: QuestOut
+    correct: bool | None = None
+    awarded_xp: int = 0
+    penalty_xp: int = 0
+    already_applied: bool = False
+
+
+class FieldTestOut(BaseModel):
+    status: Literal["ready", "running", "expired", "finished"]
+    server_now: datetime
+    started_at: datetime | None
+    deadline_at: datetime | None
+    finished_at: datetime | None
+    elapsed_seconds: int
+    remaining_seconds: int
+    score: int
+    maximum_score: int = 1000
+    completed_quests: int
+    total_quests: int = 4
+    leaderboard_position: int | None
 
 
 class CheckInInput(Input):
@@ -227,6 +261,7 @@ class QuestAdminOut(ORMModel):
     starts_at: datetime | None
     expires_at: datetime | None
     is_active: bool
+    field_test_step: int | None = None
 
 
 class ActiveInput(Input):
