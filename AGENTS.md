@@ -2,25 +2,27 @@
 
 ## Mission
 
-AYLOOR is a multiplayer real-world game.
+AYLOOR is a playable city guide product currently evolving from its original multiplayer city-game MVP.
 
 Public positioning:
 
-**AYLOOR**
-**Play the real world.**
+**AYLOOR — A city guide you play.**
 
-First launch market: Yerevan, Armenia.
+First launch market: Yerevan, Armenia. First product: **Yerevan: Look Closer**.
 
-First season:
+**EXPLORE** is the current product direction and priority: solo-friendly, English-first city walks for visitors, with no mandatory Telegram or team.
 
-**AYLOOR YEREVAN — SEASON ZERO**\
-**The city is your game.**
+Target journey:
 
-Current goal: validate one complete multiplayer real-world gameplay loop:
+Discover city → choose walk → start anytime → walk → notice → solve → reveal → continue → finish
 
-Telegram → Mini App → Create Team → Invite Friend → Team becomes active → Start Quest → GPS Check-in → Backend verification → XP → Leaderboard
+Core loop: **WALK → NOTICE → SOLVE → REVEAL → CONTINUE**.
 
-Do not optimize for a hypothetical global platform before this loop works well in real use.
+The user should look at the city more than at the phone.
+
+Current implementation is still the multiplayer Telegram Mini App: teams, server GPS verification, quests, XP/ScoreEvent and leaderboard, including FIELD TEST ZERO. EXPLORE is a target, not an implemented flow. Keep the existing multiplayer stack until an explicit migration task changes it; do not remove legacy systems merely because the product direction changed.
+
+**PLAY** / competitive city games and seasons remain a possible future mode, not the current priority. Validate one complete playable guide before expanding the platform.
 
 ---
 
@@ -48,7 +50,7 @@ Preserve existing conventions unless a concrete reason warrants change.
 
 Do not treat this file as complete product or implementation documentation.
 
-Before a non-trivial change, inspect relevant code, tests and documentation: `README.md`, `docs/DECISIONS_V01.md`, `docs/MVP_V01.md` and feature-specific documents under `docs/`.
+Before a non-trivial change, inspect relevant code, tests and documentation: `README.md`, `docs/PRODUCT_DIRECTION_V2.md`, `docs/MVP_V02.md`, and relevant feature-specific documents under `docs/`. Use `docs/DECISIONS_V01.md` and `docs/MVP_V01.md` for historical/current implementation context; they do not define the new product priority.
 
 Check both code and documentation for freshness.
 
@@ -173,15 +175,15 @@ Do not remove an existing backend validation merely because the frontend already
 
 ## Product invariants
 
-A team requires at least 2 members to become active.
+EXPLORE target: solo-first, start anytime, no required account before start, no mandatory Telegram or team, pause/resume and no hard timer. Leaderboard is not central.
 
-MVP team size is 2–5 people.
+These targets do not authorize bypassing current authentication or gameplay validation. Existing multiplayer rules remain in force until explicitly migrated: a team requires at least 2 members to become active; team size is 2–5 people.
 
-Location is requested only after explicit user action.
+Location is requested only when useful and after explicit user action.
 
 Do not implement continuous or background location tracking.
 
-The current vertical slice takes priority over future feature breadth.
+Prioritize one complete playable guide over future feature breadth. EXPLORE behavior requires separately scoped implementation work.
 
 ---
 
@@ -343,7 +345,9 @@ Implement requested behavior before reporting completion:
 
 ## Scope discipline
 
-Prioritize the gameplay loop in Mission.
+Prioritize EXPLORE and the journey in Mission. Product direction is documented in `docs/PRODUCT_DIRECTION_V2.md`; the first guide MVP is scoped in `docs/MVP_V02.md`.
+
+Do not start a PLAY expansion, legacy-system removal, Capacitor migration or redesign without an explicit task. Reuse current frontend investment where practical; platform and migration architecture require separate evaluation.
 
 Do not implement unless explicitly requested:
 
@@ -368,4 +372,4 @@ Do not implement unless explicitly requested:
 
 Future extensibility must not complicate the current implementation.
 
-Build the smallest solid version of AYLOOR that can be tested with real players.
+Build the smallest solid playable guide that can be tested with real visitors, while preserving current implementation invariants until explicitly migrated.

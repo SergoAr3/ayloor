@@ -1,17 +1,33 @@
 # AYLOOR v0.1
 
-**Play the real world.**
+**AYLOOR — A city guide you play.**
 
-Multiplayer real-world game. Первый город — Ереван, Армения (`Asia/Yerevan`).
-Первый сезон — **AYLOOR YEREVAN — SEASON ZERO / The city is your game.**
+AYLOOR is a playable city guide product currently evolving from its original multiplayer city-game MVP.
 
-v0.1 реализует один vertical slice:
+Текущий продуктовый курс — **EXPLORE**: самостоятельные прогулки с городскими
+загадками для англоязычных туристов. Первый продукт — **Yerevan: Look Closer**:
+4–5 остановок, около 60–75 минут, solo-friendly, старт в любое время,
+без обязательных Telegram, команды или аккаунта до старта; с pause/resume и без
+жёсткого таймера. Пользователь должен смотреть на город чаще, чем на телефон.
+
+Целевой цикл: **WALK → NOTICE → SOLVE → REVEAL → CONTINUE**.
+**PLAY** — возможный будущий режим competitive city games / seasons, не текущий приоритет.
+
+Это направление ещё не реализовано. Текущий v0.1 остаётся multiplayer Telegram
+Mini App с командами 2–5 человек, серверной GPS-проверкой, XP и leaderboard:
 
 Telegram → Mini App → Telegram auth → Create Team → Invite → Join → Team Active
 → First Checkpoint → Start Quest → GPS Check-in → Backend Verification → +100 XP → Leaderboard.
 
-Цель — проверить реальную командную игру и возвращение команды на вторую IRL-сессию,
-а не строить глобальную платформу. Участие бесплатное, команды 2–5 человек.
+FIELD TEST ZERO расширяет эту реализацию четырьмя последовательными quests,
+серверным 90-minute timer и text answers. Эти правила не являются требованиями EXPLORE.
+Технические инструкции ниже относятся к существующему codebase.
+
+Новый курс: [Product Direction v2](docs/PRODUCT_DIRECTION_V2.md) и
+[MVP v0.2](docs/MVP_V02.md). История и контекст текущей реализации:
+[MVP v0.1](docs/MVP_V01.md), [Decisions v0.1](docs/DECISIONS_V01.md),
+[FIELD TEST ZERO](docs/FIELD_TEST_ZERO.md).
+Миграция к EXPLORE требует отдельных задач; эта документация не меняет runtime.
 
 ## Стек и структура
 
