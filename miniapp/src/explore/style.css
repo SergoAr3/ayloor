@@ -1,0 +1,7 @@
+.explore-page { padding-bottom: 2rem; }
+.explore-page h1 { overflow-wrap: anywhere; }
+.explore-page section { margin-block: 1.5rem; }
+.explore-page .action { margin-block: .5rem; }
+.explore-page p { overflow-wrap: anywhere; }
+.explore-page > h1, .explore-page > p { margin-inline: 20px; }
+.explore-page > .action, .explore-page > .error { margin-inline: 20px; width: calc(100% - 40px); }

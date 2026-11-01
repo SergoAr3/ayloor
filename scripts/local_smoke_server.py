@@ -36,6 +36,9 @@ async def prepare() -> None:
     from app.seed import main as seed_database
 
     await seed_database()
+    from app.explore_seed import main as seed_explore
+
+    await seed_explore()
 
 
 if __name__ == "__main__":

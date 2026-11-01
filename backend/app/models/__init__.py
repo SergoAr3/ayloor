@@ -328,3 +328,7 @@ class Invite(Identity, Created, Base):
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     max_uses: Mapped[int | None] = mapped_column(Integer)
     uses: Mapped[int] = mapped_column(Integer, default=0)
+
+
+# Register additive models with the shared Alembic metadata.
+from app.models.explore import ExploreRun, Guide, GuideStop  # noqa: F401
