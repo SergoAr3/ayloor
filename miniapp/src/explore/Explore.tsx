@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import Arrival from "./Arrival";
 import { ActionButton, ErrorNotice } from "../components/ui";
 import { ApiError, ApiTransportError } from "../apiErrors";
 import { exploreApi, guideSlug, loadSaved, newStartKey, save, storageKey, type Guide, type Run, type Saved, type Start } from "./api";
@@ -76,12 +77,16 @@ export default function Explore() {
     if (kind === "answer") {
       const result = await exploreApi<{ accepted: boolean; run: Run }>(`/runs/${run.id}/answer`, saved.credential, body);
       if (current !== epoch.current) return;
-      setRun(result.run);
+      setRun(current => current?.id === result.run.id && current.stop.id === result.run.stop.id
+        && result.run.phase !== "finished" && current.arrival.status === "confirmed"
+        ? { ...result.run, arrival: current.arrival } : result.run);
       setFeedback(result.accepted ? "" : "That is not the answer. Look again or try the free hint.");
     } else {
       const result = await exploreApi<Run>(`/runs/${run.id}/${kind}`, saved.credential, body);
       if (current !== epoch.current) return;
-      setRun(result);
+      setRun(current => kind === "hint" && current?.id === result.id && current.stop.id === result.stop.id
+        && result.phase !== "finished" && current.arrival.status === "confirmed"
+        ? { ...result, arrival: current.arrival } : result);
     }
     setText("");
   }
@@ -103,6 +108,12 @@ export default function Explore() {
       <p className="eyebrow">STOP {run.stop.position} / {run.guide.stop_count}</p>
       {run.phase === "finished" ? <><h2>FINISH</h2><p>You completed the demo.</p><p>{run.stop.reveal}</p></> : <>
         <h2>{run.stop.title}</h2>
+        {run.stop.directions && <p>Directions: {run.stop.directions}</p>}
+        {run.stop.checkpoint && saved && "credential" in saved && <Arrival
+          key={`${run.id}:${run.stop.id}`} run={run} credential={saved.credential} disabled={disabled}
+          onArrival={arrival => setRun(current => current && current.id === run.id && current.stop.id === run.stop.id
+            && current.phase !== "finished" && current.arrival.status !== "confirmed" ? { ...current, arrival } : current)}
+        />}
         {run.phase === "clue" ? <>
           <p>{run.stop.clue}</p>
           {run.stop.hint ? <p role="note">Hint: {run.stop.hint}</p> : <ActionButton secondary disabled={disabled} onClick={() => void act(() => mutate("hint"))}>FREE HINT</ActionButton>}
