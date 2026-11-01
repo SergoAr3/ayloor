@@ -1,3 +1,4 @@
+import { resolve } from "node:path";
 import react from "@vitejs/plugin-react";
 import { defineConfig, loadEnv } from "vite";
 import { apiBase } from "./src/apiBase";
@@ -11,6 +12,7 @@ export default defineConfig(({ mode, command }) => {
     : "";
   return {
     plugins: [react()],
+    build: { rollupOptions: { input: { main: resolve(import.meta.dirname, "index.html"), explore: resolve(import.meta.dirname, "explore.html") } } },
     envDir: "..",
     server: {
       // Explicit host allowlist for your configured HTTPS tunnel.

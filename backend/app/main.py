@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 
 from app.api.deps import DB
+from app.api.explore import router as explore_router
 from app.api.routes import router
 from app.core.config import get_settings
 
@@ -15,6 +16,7 @@ app.add_middleware(
     allow_headers=["Authorization", "Content-Type"],
 )
 app.include_router(router)
+app.include_router(explore_router)
 
 
 @app.get("/health")

@@ -13,7 +13,9 @@ AYLOOR is a playable city guide product currently evolving from its original mul
 Целевой цикл: **WALK → NOTICE → SOLVE → REVEAL → CONTINUE**.
 **PLAY** — возможный будущий режим competitive city games / seasons, не текущий приоритет.
 
-Это направление ещё не реализовано. Текущий v0.1 остаётся multiplayer Telegram
+Первый технический Explore slice доступен как отдельный [web demo](docs/EXPLORE_WEB_SLICE.md):
+Start → Answer → Reveal → Continue → Resume → Finish. Это synthetic content,
+не готовый Yerevan guide и не полный MVP v0.2. Текущий v0.1 остаётся multiplayer Telegram
 Mini App с командами 2–5 человек, серверной GPS-проверкой, XP и leaderboard:
 
 Telegram → Mini App → Telegram auth → Create Team → Invite → Join → Team Active
@@ -45,7 +47,7 @@ backend/
     services/       команды, invites, quests, GPS, leaderboard
     main.py         FastAPI
     seed.py         idempotent seed CLI
-  migrations/       Alembic revisions 0001 → 0002 → 0003
+  migrations/       Alembic revisions 0001 → 0002 → 0003 → 0004
   tests/            PostgreSQL integration и business tests
 bot/app/            пакет ayloor_bot: /start + WebApp-кнопка, без FSM
 bot/tests/          stateless URL handoff и handlers без запросов Telegram
