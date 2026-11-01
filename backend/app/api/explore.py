@@ -3,18 +3,20 @@
 import hashlib
 import hmac
 import re
+from datetime import datetime
 from typing import Annotated, Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Response
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from pydantic import BaseModel, ConfigDict, Field, SecretStr
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, SecretStr
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import DB, Config
-from app.models import ExploreRun, Guide, GuideStop
+from app.models import ExploreRun, Guide, GuideStop, utcnow
+from app.services.game import haversine_m
 
 bearer = HTTPBearer(auto_error=False)
 
@@ -36,6 +38,25 @@ class AnswerInput(StepInput):
     answer: str = Field(min_length=1, max_length=200)
 
 
+class ArrivalInput(StepInput):
+    latitude: float = Field(ge=-90, le=90, allow_inf_nan=False)
+    longitude: float = Field(ge=-180, le=180, allow_inf_nan=False)
+    accuracy_m: float = Field(ge=0, allow_inf_nan=False)
+    captured_at: AwareDatetime
+
+
+class CheckpointOut(BaseModel):
+    latitude: float
+    longitude: float
+    radius_m: float
+    max_accuracy_m: float
+
+
+class ArrivalState(BaseModel):
+    status: Literal["not_configured", "unconfirmed", "confirmed"]
+    confirmed_at: datetime | None
+
+
 class GuideOut(BaseModel):
     slug: str
     title: str
@@ -50,6 +71,8 @@ class StopOut(BaseModel):
     clue: str
     hint: str | None
     reveal: str | None
+    directions: str | None
+    checkpoint: CheckpointOut | None
 
 
 class RunOut(BaseModel):
@@ -57,6 +80,7 @@ class RunOut(BaseModel):
     guide: GuideOut
     phase: Literal["clue", "reveal", "finished"]
     stop: StopOut
+    arrival: ArrivalState
 
 
 class StartOut(BaseModel):
@@ -66,6 +90,11 @@ class StartOut(BaseModel):
 
 class AnswerOut(BaseModel):
     accepted: bool
+    run: RunOut
+
+
+class ArrivalOut(BaseModel):
+    outcome: Literal["confirmed", "low_accuracy", "uncertain", "outside", "stale_sample"]
     run: RunOut
 
 
@@ -100,11 +129,30 @@ async def snapshot(db: AsyncSession, run: ExploreRun) -> RunOut:
             slug=guide.slug, title=guide.title, description=guide.description, stop_count=len(stops)
         ),
         phase=run.phase,
+        arrival=ArrivalState(
+            status=(
+                "not_configured"
+                if stop.latitude is None
+                else "confirmed"
+                if run.arrived_stop_id == stop.id
+                else "unconfirmed"
+            ),
+            confirmed_at=run.arrived_at if run.arrived_stop_id == stop.id else None,
+        ),
         stop=StopOut(
             id=stop.id,
             position=stop.position,
             title=stop.title,
             clue=stop.clue,
+            directions=stop.directions,
+            checkpoint=CheckpointOut(
+                latitude=stop.latitude,
+                longitude=stop.longitude,
+                radius_m=stop.radius_m,
+                max_accuracy_m=stop.max_accuracy_m,
+            )
+            if stop.latitude is not None
+            else None,
             hint=stop.hint if stop.position in run.hinted_positions else None,
             reveal=stop.reveal if run.phase in ("reveal", "finished") else None,
         ),
@@ -197,6 +245,35 @@ async def resume(db: DB, run: OwnedRun):
     return await snapshot(db, run)
 
 
+@router.post("/runs/{run_id}/arrival", response_model=ArrivalOut)
+async def arrival(data: ArrivalInput, db: DB, run: OwnedRun):
+    stop = await expected_stop(db, run, data.stop_id)
+    if stop.position != run.position or run.phase == "finished":
+        raise HTTPException(409, "Arrival is only available for the current unfinished stop")
+    if stop.latitude is None:
+        raise HTTPException(409, "This stop has no checkpoint")
+    # Lock held by owned_run: retries preserve the first server timestamp. Samples
+    # are never stored, including failed attempts. Confirmation is historical.
+    outcome = "confirmed"
+    if run.arrived_stop_id != stop.id:
+        now = utcnow()
+        age = (now - data.captured_at).total_seconds()
+        distance = haversine_m(data.latitude, data.longitude, stop.latitude, stop.longitude)
+        if not -30 <= age <= 120:
+            outcome = "stale_sample"
+        elif data.accuracy_m > stop.max_accuracy_m:
+            outcome = "low_accuracy"
+        elif distance + data.accuracy_m <= stop.radius_m:
+            run.arrived_stop_id = stop.id
+            run.arrived_at = now
+            await db.flush()
+        elif distance - data.accuracy_m > stop.radius_m:
+            outcome = "outside"
+        else:
+            outcome = "uncertain"
+    return ArrivalOut(outcome=outcome, run=await snapshot(db, run))
+
+
 @router.post("/runs/{run_id}/hint", response_model=RunOut)
 async def hint(data: StepInput, db: DB, run: OwnedRun):
     stop = await expected_stop(db, run, data.stop_id)
@@ -224,6 +301,8 @@ async def advance(data: StepInput, db: DB, run: OwnedRun):
         if run.phase != "reveal":
             raise HTTPException(409, "Answer this stop before continuing")
         stops = await stops_for(db, run.guide_id)
+        run.arrived_stop_id = None
+        run.arrived_at = None
         if run.position == len(stops):
             run.phase = "finished"
         else:

@@ -39,6 +39,40 @@ async def prepare() -> None:
     from app.explore_seed import main as seed_explore
 
     await seed_explore()
+    # Separate GPS fixture, installed ONLY after the dedicated test database guard.
+    # Never change the existing no-checkpoint demo or publish invented city content.
+    from app.db.session import SessionFactory
+    from app.models import Guide, GuideStop
+    from sqlalchemy import select
+
+    async with SessionFactory.begin() as db:
+        if not await db.scalar(
+            select(Guide).where(Guide.slug == "explore-arrival-test")
+        ):
+            guide = Guide(
+                slug="explore-arrival-test",
+                title="GPS fixture",
+                description="Not a real walk",
+            )
+            db.add(guide)
+            await db.flush()
+            for position in (1, 2):
+                db.add(
+                    GuideStop(
+                        guide_id=guide.id,
+                        position=position,
+                        title="Synthetic GPS stop",
+                        clue="Synthetic card: say yes.",
+                        answer="yes",
+                        hint="Say yes.",
+                        reveal="Synthetic story.",
+                        directions="Synthetic test only. Stay in a safe place; do not travel to these coordinates.",
+                        latitude=0,
+                        longitude=0,
+                        radius_m=100,
+                        max_accuracy_m=50,
+                    )
+                )
 
 
 if __name__ == "__main__":

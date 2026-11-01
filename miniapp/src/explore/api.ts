@@ -4,9 +4,12 @@ import { ApiError, ApiTransportError } from "../apiErrors";
 export const guideSlug = "explore-demo-v1";
 export const storageKey = "ayloor-explore-demo-v1";
 export type Guide = { slug: string; title: string; description: string; stop_count: number };
+export type ArrivalState = { status: "not_configured" | "unconfirmed" | "confirmed"; confirmed_at: string | null };
+export type Checkpoint = { latitude: number; longitude: number; radius_m: number; max_accuracy_m: number };
 export type Run = {
   id: string; guide: Guide; phase: "clue" | "reveal" | "finished";
-  stop: { id: string; position: number; title: string; clue: string; hint: string | null; reveal: string | null };
+  arrival: ArrivalState;
+  stop: { directions: string | null; checkpoint: Checkpoint | null; id: string; position: number; title: string; clue: string; hint: string | null; reveal: string | null };
 };
 export type Saved = { startKey: string } | { runId: string; credential: string };
 export type Start = { credential: string; run: Run };
