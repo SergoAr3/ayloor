@@ -2,11 +2,14 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import Arrival from "./Arrival";
 import { ActionButton, ErrorNotice } from "../components/ui";
 import { ApiError, ApiTransportError } from "../apiErrors";
-import { exploreApi, guideSlug, loadSaved, newStartKey, save, storageKey, type Guide, type Run, type Saved, type Start } from "./api";
+import { exploreApi, newStartKey, type Guide, type Run, type Start } from "./api";
+import { entryGuide, entryUrl, lastGuideKey, legacyStorageKey, loadSaved, previousWalkLink, remember, restoreWalk, save, storageKey, type Saved } from "./session";
 
 const errorMessage = (error: unknown) => error instanceof Error ? error.message : "Unable to continue. Please retry.";
 
 export default function Explore() {
+  const [previous, setPrevious] = useState<string | null>(null);
+  const selectedSlug = useRef<string | null>(null);
   const [guide, setGuide] = useState<Guide | null>(null);
   const [saved, setSaved] = useState<Saved | null>(null);
   const [run, setRun] = useState<Run | null>(null);
@@ -21,15 +24,25 @@ export default function Explore() {
 
   const restore = useCallback(async () => {
     const current = ++epoch.current;
-    setLoading(true); setError("");
+    setLoading(true); setError(""); setGuide(null); setRun(null); setSaved(null); setPrevious(null);
     try {
-      const stored = loadSaved();
-      setSaved(stored);
-      const info = await exploreApi<Guide>(`/guides/${guideSlug}`);
-      const state = stored && "credential" in stored
-        ? await exploreApi<Run>(`/runs/${stored.runId}`, stored.credential) : null;
+      const entry = entryGuide(window.location.search);
+      setPrevious(previousWalkLink(entry));
+      const state = await restoreWalk(entry);
       if (current !== epoch.current) return;
-      setGuide(info); setRun(state); setNeedsResume(false); setText(""); setFeedback("");
+      const latest = loadSaved(state.slug);
+      if (state.migrate && state.saved) {
+        if (latest) throw new Error("Saved access changed in another tab. Resume again.");
+        save(state.slug, state.saved);
+      } else if (JSON.stringify(latest) !== JSON.stringify(state.saved)) {
+        throw new Error("Saved access changed in another tab. Resume again.");
+      } else if (state.saved) remember(state.slug);
+      selectedSlug.current = state.slug;
+      // A bare resume entry becomes a stable version link, even if another tab
+      // later changes the last-guide pointer.
+      if (!entry) window.history.replaceState(null, "", entryUrl(state.slug));
+      setGuide(state.guide); setSaved(state.saved); setRun(state.run);
+      setNeedsResume(false); setText(""); setFeedback("");
     } catch (e) { if (current === epoch.current) { setError(errorMessage(e)); setNeedsResume(true); } }
     finally { if (current === epoch.current) setLoading(false); }
   }, []);
@@ -37,7 +50,11 @@ export default function Explore() {
   useEffect(() => {
     void restore();
     const visible = () => { if (!document.hidden && !busyRef.current) void restore(); };
-    const storage = (event: StorageEvent) => { if (event.key === storageKey) void restore(); };
+    const storage = (event: StorageEvent) => {
+      const relevant = selectedSlug.current ? event.key === storageKey(selectedSlug.current)
+        : event.key === lastGuideKey || event.key === legacyStorageKey;
+      if (event.key === null || relevant) void restore();
+    };
     document.addEventListener("visibilitychange", visible);
     window.addEventListener("storage", storage);
     return () => { epoch.current++; document.removeEventListener("visibilitychange", visible); window.removeEventListener("storage", storage); };
@@ -60,14 +77,16 @@ export default function Explore() {
   async function start() {
     // Persist the secret retry key BEFORE the request. No run starts if storage fails.
     const current = epoch.current;
-    const existing = loadSaved();
+    if (!guide) return;
+    const existing = loadSaved(guide.slug);
     if (existing && "credential" in existing) { await restore(); return; }
     const pending = existing && "startKey" in existing ? existing : { startKey: newStartKey() };
-    save(pending); setSaved(pending);
-    const result = await exploreApi<Start>(`/guides/${guideSlug}/runs`, undefined, { start_key: pending.startKey });
+    save(guide.slug, pending); setSaved(pending);
+    const result = await exploreApi<Start>(`/guides/${guide.slug}/runs`, undefined, { start_key: pending.startKey });
     if (current !== epoch.current) return;
+    if (result.run.guide.slug !== guide.slug) throw new Error("Started walk does not match this link. Resume to check saved progress.");
     const credential = { runId: result.run.id, credential: result.credential };
-    save(credential); setSaved(credential); setRun(result.run); setNeedsResume(false);
+    save(guide.slug, credential); setSaved(credential); setRun(result.run); setNeedsResume(false);
   }
 
   async function mutate(kind: "hint" | "answer" | "continue") {
@@ -93,20 +112,21 @@ export default function Explore() {
 
   const disabled = busy || loading || needsResume;
   return <main className="app explore-page">
-    <header className="brand"><span className="wordmark">AYLOOR</span><span>EXPLORE / DEMO</span></header>
+    <header className="brand"><span className="wordmark">AYLOOR</span><span>EXPLORE</span></header>
     <p className="eyebrow">A CITY GUIDE YOU PLAY</p>
-    <h1>{guide?.title || "Explore flow demo"}</h1>
-    <p>Two synthetic steps. This is a flow test, not a real city walk.</p>
+    <h1>{guide?.title || "Explore"}</h1>
+    {guide && <><p>{guide.description}</p><p>{guide.stop_count} stops</p></>}
+    {previous && <p><a href={previous}>RESUME PREVIOUS WALK</a></p>}
     {loading && <p role="status">Loading saved progress…</p>}
     {error && <ErrorNotice>{error}</ErrorNotice>}
     {(needsResume || error) && <ActionButton secondary disabled={busy || loading} onClick={() => void restore()}>RESUME / RETRY</ActionButton>}
-    {!run && guide && !loading && <section aria-label="Start demo">
+    {!run && guide && !loading && <section aria-label="Start walk">
       <p>No account, Telegram or team needed. No timer. Resume in this browser on this device; clearing site data loses access. Internet is required.</p>
-      <ActionButton disabled={busy || (needsResume && !(saved && "startKey" in saved))} onClick={() => void act(start)}>{saved && "startKey" in saved ? "RESUME START" : "START DEMO"}</ActionButton>
+      <ActionButton disabled={busy || (needsResume && !(saved && "startKey" in saved))} onClick={() => void act(start)}>{saved && "startKey" in saved ? "RESUME START" : "START WALK"}</ActionButton>
     </section>}
     {run && !loading && <section aria-label="Guide progress">
       <p className="eyebrow">STOP {run.stop.position} / {run.guide.stop_count}</p>
-      {run.phase === "finished" ? <><h2>FINISH</h2><p>You completed the demo.</p><p>{run.stop.reveal}</p></> : <>
+      {run.phase === "finished" ? <><h2>FINISH</h2><p>You completed {run.guide.title}.</p><p>{run.stop.reveal}</p></> : <>
         <h2>{run.stop.title}</h2>
         {run.stop.directions && <p>Directions: {run.stop.directions}</p>}
         {run.stop.checkpoint && saved && "credential" in saved && <Arrival

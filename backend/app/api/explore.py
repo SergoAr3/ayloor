@@ -191,7 +191,7 @@ async def expected_stop(db: AsyncSession, run: ExploreRun, stop_id: UUID) -> Gui
 @router.get("/guides/{slug}", response_model=GuideOut)
 async def guide(slug: str, db: DB):
     guide = await db.scalar(select(Guide).where(Guide.slug == slug))
-    if guide is None:
+    if guide is None or guide.published_at is None:
         raise HTTPException(404, "Guide is not available")
     stops = await stops_for(db, guide.id)
     if not stops:
@@ -207,7 +207,7 @@ async def start(slug: str, data: StartInput, db: DB, settings: Config):
     if not re.fullmatch(r"[0-9a-f]{64}", key):
         raise HTTPException(422, "Start key must be 32 random bytes encoded as lowercase hex")
     guide = await db.scalar(select(Guide).where(Guide.slug == slug))
-    if guide is None:
+    if guide is None or guide.published_at is None:
         raise HTTPException(404, "Guide is not available")
     stops = await stops_for(db, guide.id)
     if not stops or [s.position for s in stops] != list(range(1, len(stops) + 1)):

@@ -1,0 +1,34 @@
+{
+  "slug": "example-walk-v1",
+  "title": "Three-stop practice walk",
+  "description": "Synthetic publication example. Not a real city walk; stay where you are.",
+  "stops": [
+    {
+      "position": 1,
+      "title": "A word",
+      "directions": "Stay in a safe place. This is a screen-only practice stop.",
+      "clue": "Practice card: LOOK CLOSER. What is the second word?",
+      "answer": "closer",
+      "hint": "Read after LOOK.",
+      "reveal": "CLOSER is the second word. This is a practice Reveal."
+    },
+    {
+      "position": 2,
+      "title": "A shape",
+      "directions": "No walking required. Continue with this synthetic card.",
+      "clue": "How many sides does a triangle have? Enter a digit.",
+      "answer": "3",
+      "hint": "Count three sides.",
+      "reveal": "A triangle has three sides. One practice stop remains."
+    },
+    {
+      "position": 3,
+      "title": "A final word",
+      "directions": "This is the last screen-only practice stop.",
+      "clue": "Practice card: TAKE NOTICE. What is the second word?",
+      "answer": "notice",
+      "hint": "Read after TAKE.",
+      "reveal": "You completed all three practice stops."
+    }
+  ]
+}

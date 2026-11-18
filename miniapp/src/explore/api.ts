@@ -1,8 +1,6 @@
 import { apiBase } from "../apiBase";
 import { ApiError, ApiTransportError } from "../apiErrors";
 
-export const guideSlug = "explore-demo-v1";
-export const storageKey = "ayloor-explore-demo-v1";
 export type Guide = { slug: string; title: string; description: string; stop_count: number };
 export type ArrivalState = { status: "not_configured" | "unconfirmed" | "confirmed"; confirmed_at: string | null };
 export type Checkpoint = { latitude: number; longitude: number; radius_m: number; max_accuracy_m: number };
@@ -11,26 +9,7 @@ export type Run = {
   arrival: ArrivalState;
   stop: { directions: string | null; checkpoint: Checkpoint | null; id: string; position: number; title: string; clue: string; hint: string | null; reveal: string | null };
 };
-export type Saved = { startKey: string } | { runId: string; credential: string };
 export type Start = { credential: string; run: Run };
-
-export function loadSaved(): Saved | null {
-  const raw = localStorage.getItem(storageKey);
-  if (!raw) return null;
-  const data: unknown = JSON.parse(raw);
-  if (data && typeof data === "object") {
-    if ("startKey" in data && typeof data.startKey === "string" && /^[a-f0-9]{64}$/.test(data.startKey))
-      return { startKey: data.startKey };
-    if ("runId" in data && typeof data.runId === "string" && /^[a-f0-9-]{36}$/.test(data.runId)
-      && "credential" in data && typeof data.credential === "string" && /^[a-f0-9]{64}$/.test(data.credential))
-      return { runId: data.runId, credential: data.credential };
-  }
-  throw new Error("Saved demo access is unreadable. Start over on this device to continue.");
-}
-
-export function save(value: Saved): void {
-  localStorage.setItem(storageKey, JSON.stringify(value));
-}
 
 export function newStartKey(): string {
   return Array.from(crypto.getRandomValues(new Uint8Array(32)), byte => byte.toString(16).padStart(2, "0")).join("");

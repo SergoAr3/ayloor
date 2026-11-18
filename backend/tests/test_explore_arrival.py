@@ -44,6 +44,8 @@ async def checkpoint(database):
                     max_accuracy_m=50,
                 )
             )
+        await db.flush()
+        guide.published_at = utcnow()
         return guide.slug
 
 
@@ -214,8 +216,30 @@ async def test_migration_0005_preserves_existing_explore(client, demo, database)
         "directions = '   '",
     ],
 )
-async def test_checkpoint_database_constraints(checkpoint, database, assignment):
-    # Full config already exists, so latitude=0 is tested against cleared config.
+async def test_checkpoint_database_constraints(database, assignment):
+    # Unpublished content exercises config constraints, independently of the
+    # published-content immutability trigger.
+    async with database.begin() as db:
+        guide = Guide(slug="draft-checkpoint", title="Draft", description="Test")
+        db.add(guide)
+        await db.flush()
+        db.add(
+            GuideStop(
+                guide_id=guide.id,
+                position=1,
+                title="Test",
+                clue="Test",
+                answer="yes",
+                hint="Test",
+                reveal="Test",
+                directions="Test",
+                latitude=0,
+                longitude=0,
+                radius_m=100,
+                max_accuracy_m=50,
+            )
+        )
+    # Full config exists, so latitude=0 is tested against cleared config.
     async with database.begin() as db:
         if assignment == "latitude = 0":
             await db.execute(
