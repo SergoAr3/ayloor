@@ -214,6 +214,11 @@ Production frontend использует explicit HTTPS API origin; пустой
 один polling bot и static Mini App. Railway resources и реальный production smoke
 выполняются оператором. Не публикуйте Vite dev server как production.
 
+Экспериментальный лендинг Budapest доступен по `http://127.0.0.1:5173/budapest.html`.
+Для CTA задайте публичный HTTPS URL внешней формы в `VITE_BUDAPEST_EARLY_ACCESS_URL`
+(корневой `.env` или переменная сборки) и перезапустите Vite или пересоберите frontend.
+При пустом или невалидном URL страница сообщает, что запись закрыта. Лендинг не обращается к API.
+
 ## Создание Telegram bot и HTTPS Mini App URL
 
 1. В официальном `@BotFather` выполните `/newbot`, получите token и username.
