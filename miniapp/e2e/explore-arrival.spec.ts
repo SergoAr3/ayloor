@@ -6,9 +6,9 @@ async function openRun(page: Page) {
   expect(response.ok()).toBe(true);
   const { run, credential } = await response.json();
   await page.addInitScript(saved => {
-    if (!localStorage.getItem("ayloor-explore-demo-v1")) localStorage.setItem("ayloor-explore-demo-v1", JSON.stringify(saved));
+    if (!localStorage.getItem("ayloor-explore:v1:guide:explore-arrival-test")) localStorage.setItem("ayloor-explore:v1:guide:explore-arrival-test", JSON.stringify(saved));
   }, { runId: run.id, credential });
-  await page.goto("/explore.html");
+  await page.goto("/explore.html?guide=explore-arrival-test");
   await expect(page.getByLabel("Answer", { exact: true })).toBeEnabled();
 }
 

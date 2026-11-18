@@ -39,27 +39,21 @@ async def prepare() -> None:
     from app.explore_seed import main as seed_explore
 
     await seed_explore()
-    # Separate GPS fixture, installed ONLY after the dedicated test database guard.
-    # Never change the existing no-checkpoint demo or publish invented city content.
+    # Fixtures are installed only after the dedicated test database guard.
     from app.db.session import SessionFactory
     from app.models import Guide, GuideStop
+    from app.publish_guide import GuideSpec, StopSpec, publish, read_spec
     from sqlalchemy import select
 
     async with SessionFactory.begin() as db:
-        if not await db.scalar(
-            select(Guide).where(Guide.slug == "explore-arrival-test")
-        ):
-            guide = Guide(
+        await publish(
+            db,
+            GuideSpec(
                 slug="explore-arrival-test",
                 title="GPS fixture",
                 description="Not a real walk",
-            )
-            db.add(guide)
-            await db.flush()
-            for position in (1, 2):
-                db.add(
-                    GuideStop(
-                        guide_id=guide.id,
+                stops=[
+                    StopSpec(
                         position=position,
                         title="Synthetic GPS stop",
                         clue="Synthetic card: say yes.",
@@ -72,7 +66,30 @@ async def prepare() -> None:
                         radius_m=100,
                         max_accuracy_m=50,
                     )
-                )
+                    for position in (1, 2)
+                ],
+            ),
+        )
+        example = read_spec(ROOT / "backend/guides/example-walk-v1.json")
+        await publish(db, example)
+        second = example.model_dump()
+        second.update(slug="example-walk-v2", title="Practice walk, second version")
+        second["stops"][0]["reveal"] = "Second version Reveal."
+        await publish(db, GuideSpec.model_validate(second))
+        if not await db.scalar(
+            select(Guide).where(Guide.slug == "unpublished-walk-v1")
+        ):
+            draft = Guide(
+                slug="unpublished-walk-v1",
+                title="Private draft",
+                description="Not published",
+            )
+            db.add(draft)
+            await db.flush()
+            db.add_all(
+                GuideStop(guide_id=draft.id, **stop.model_dump())
+                for stop in example.stops
+            )
 
 
 if __name__ == "__main__":

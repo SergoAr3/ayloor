@@ -25,6 +25,7 @@ class Guide(Identity, Created, Base):
     slug: Mapped[str] = mapped_column(String(100), unique=True)
     title: Mapped[str] = mapped_column(String(255))
     description: Mapped[str] = mapped_column(Text)
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 # Explicit NULL checks prevent SQL CHECK's unknown result accepting partial config.

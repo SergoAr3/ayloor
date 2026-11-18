@@ -1,6 +1,7 @@
 import { afterEach, expect, it, vi } from "vitest";
 import { ApiError, ApiTransportError } from "../apiErrors";
-import { exploreApi, loadSaved, newStartKey, save, storageKey } from "./api";
+import { exploreApi, newStartKey } from "./api";
+import { loadSaved, save, storageKey, lastGuideKey } from "./session";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -8,20 +9,20 @@ it("restores pending starts and run access without ever reading the Telegram tok
   const values = new Map<string, string>();
   const get = vi.fn((key: string) => values.get(key) ?? null);
   vi.stubGlobal("localStorage", { getItem: get, setItem: (key: string, value: string) => values.set(key, value) });
-  expect(loadSaved()).toBeNull();
+  expect(loadSaved("walk-v1")).toBeNull();
   const pending = { startKey: "a".repeat(64) };
-  save(pending); expect(loadSaved()).toEqual(pending);
+  save("walk-v1", pending); expect(loadSaved("walk-v1")).toEqual(pending);
   const ready = { runId: "00000000-0000-4000-8000-000000000001", credential: "b".repeat(64) };
-  save(ready); expect(loadSaved()).toEqual(ready);
-  values.set(storageKey, '{"credential":"invalid"}');
-  expect(() => loadSaved()).toThrow("Saved demo access is unreadable");
-  expect(get.mock.calls.every(([key]) => key === storageKey)).toBe(true);
+  save("walk-v1", ready); expect(loadSaved("walk-v1")).toEqual(ready);
+  values.set(storageKey("walk-v1"), '{"credential":"invalid"}');
+  expect(() => loadSaved("walk-v1")).toThrow("Saved walk access is unreadable");
+  expect(get.mock.calls.every(([key]) => key === storageKey("walk-v1") || key === lastGuideKey)).toBe(true);
 });
 
 it("propagates unavailable storage instead of silently starting an unresumable run", () => {
   vi.stubGlobal("localStorage", { getItem: () => { throw new Error("blocked"); }, setItem: () => { throw new Error("blocked"); } });
-  expect(() => loadSaved()).toThrow("blocked");
-  expect(() => save({ startKey: "a".repeat(64) })).toThrow("blocked");
+  expect(() => loadSaved("walk-v1")).toThrow("blocked");
+  expect(() => save("walk-v1", { startKey: "a".repeat(64) })).toThrow("blocked");
 });
 
 it("uses crypto randomness for a secret 256-bit retry key", () => {

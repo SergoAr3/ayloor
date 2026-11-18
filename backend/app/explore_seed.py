@@ -2,30 +2,17 @@
 
 import asyncio
 
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import SessionFactory
-from app.models import Guide, GuideStop
+from app.models import Guide
+from app.publish_guide import GuideSpec, StopSpec, publish
 
 DEMO_SLUG = "explore-demo-v1"
 
 
 async def seed(db: AsyncSession) -> Guide:
-    # Serialize concurrent seeds without changing an existing published guide.
-    from sqlalchemy import text
-
-    await db.execute(text("SELECT pg_advisory_xact_lock(41004001)"))
-    existing = await db.scalar(select(Guide).where(Guide.slug == DEMO_SLUG))
-    if existing:
-        return existing
-    guide = Guide(
-        slug=DEMO_SLUG,
-        title="Explore flow demo",
-        description="Two synthetic steps to test the flow. Not a real city walk or Yerevan guide.",
-    )
-    db.add(guide)
-    await db.flush()
+    stops = []
     for position, title, clue, answer, hint, reveal in [
         (
             1,
@@ -44,9 +31,8 @@ async def seed(db: AsyncSession) -> Guide:
             "A triangle has three sides. You have reached the last demo stop.",
         ),
     ]:
-        db.add(
-            GuideStop(
-                guide_id=guide.id,
+        stops.append(
+            StopSpec(
                 position=position,
                 title=title,
                 clue=clue,
@@ -55,8 +41,15 @@ async def seed(db: AsyncSession) -> Guide:
                 reveal=reveal,
             )
         )
-    await db.flush()
-    return guide
+    return await publish(
+        db,
+        GuideSpec(
+            slug=DEMO_SLUG,
+            title="Explore flow demo",
+            description="Two synthetic steps to test the flow. Not a real city walk or Yerevan guide.",
+            stops=stops,
+        ),
+    )
 
 
 async def main() -> None:

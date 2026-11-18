@@ -1,41 +1,115 @@
-# Explore web flow — first implementation slice
+# Explore web flow — publication, entry and resume
 
-This is a synthetic two-stop flow demo, not the finished **Yerevan: Look Closer**
-guide or the full MVP v0.2. It implements Start → Answer → Reveal → Continue →
-Resume → Finish, with a free hint. The default demo has no checkpoints. Configured
-Explore stops support optional browser Arrival; no Telegram, team, XP or timer is used.
+Explore implements Start → Answer → Reveal → Continue → Resume → Finish, with a
+free hint and optional browser Arrival. Each published Guide row is one immutable
+version. No Telegram, team, XP or timer is required. The included guides remain
+synthetic examples, not the finished **Yerevan: Look Closer** route.
 
-## Run locally
+## Run locally and publish a version
 
 Follow README setup and reuse healthy services. Apply migrations normally:
 
 ```bash
 make migrate
+```
+
+Use the existing backend and Vite commands. Publishing is an operator CLI with
+normal backend database access, not an anonymous API or admin UI. Review the target
+DATABASE_URL before publishing; commands below write to that configured database.
+For a three-stop synthetic example:
+
+```bash
+.venv/bin/python -m app.publish_guide backend/guides/example-walk-v1.json --check
+.venv/bin/python -m app.publish_guide backend/guides/example-walk-v1.json
+```
+
+`--check` validates the complete document without opening the database. Publishing
+validates again and writes guide, stops and publication timestamp in one transaction.
+An identical re-import returns the same guide/stop IDs and timestamp. Different
+content under an existing slug is refused, including for an existing draft; there
+is no overwrite/force mode. Concurrent imports serialize, so conflicting imports
+cannot silently replace one another. A failed/ambiguous import can be retried with
+the exact same document. CLI validation output does not echo private answer values.
+
+The JSON format is demonstrated by the example file:
+
+- Guide: `slug`, `title`, `description`, `stops`. Extra fields are rejected.
+- Slug: lowercase ASCII letters/digits separated by single hyphens, up to 100 chars.
+  It identifies a **specific version**, conventionally `name-v1`, `name-v2`; there is
+  no mutable `latest` alias or separate guide-family model. Changed content needs a
+  new slug. Published guide/stop updates, inserts into that version and deletion
+  are rejected by PostgreSQL triggers as well as by the importer.
+- Stops: 1–50 records in consecutive `position` order from 1; each contains `title`,
+  `clue`, private `answer`, `hint`, `reveal`. Titles are limited to 255 chars,
+  answers to 200, other text to 10,000. Text must be nonblank, valid UTF-8 without
+  NUL. Files are capped at 1 MB; duplicate JSON keys and invalid types are rejected.
+- Optional `directions` and nullable `latitude`, `longitude`, `radius_m`,
+  `max_accuracy_m` follow the Arrival rules below. Checkpoint fields are all-or-none;
+  directions are mandatory when GPS is configured. Real routes need useful written
+  directions even without GPS; structural validation does not certify route safety,
+  historical accuracy, answer ambiguity or field readiness.
+
+Keep real answer-bearing import files private and outside frontend assets/public
+hosting. The committed JSON is explicitly synthetic. No real Yerevan content is
+installed by migration or on application startup.
+
+Open `http://localhost:5173/explore.html?guide=example-walk-v1` (adapt the host/port).
+The three example answers are **closer**, **3**, **notice**. The original two-stop
+demo remains opt-in and uses the same publishing workflow:
+
+```bash
 .venv/bin/python -m app.explore_seed
 ```
 
-Use the existing backend and Vite commands. Open
-`http://localhost:5173/explore.html` (use the host/port of your Vite instance).
-The synthetic answers are **closer** and **3**. No real walk is required.
-The seed is opt-in and idempotent; it never rewrites an existing demo guide or
-multiplayer data. Published guide rows/stops are treated as immutable versions:
-content changes need a new slug/guide row. Do not edit a guide used by saved runs.
+Its entry is `/explore.html?guide=explore-demo-v1`, with answers **closer** and **3**.
+No walking is required for either example.
 
-The production Vite build now includes both index.html (legacy Mini App) and
+## Entry and version contract
+
+`GET /api/v1/explore/guides/{slug}` and `POST /api/v1/explore/guides/{slug}/runs`
+accept only published versions. Unknown and unpublished versions return the same
+404. Start pins the selected Guide UUID; later publications never move that run.
+The public guide response contains metadata/count, not private answers or Reveals.
+Existing run endpoints and legacy multiplayer contracts are preserved.
+
+`/explore.html?guide=<slug>` opens that exact version and its saved progress, if any.
+There is no implicit default guide. Empty/invalid/duplicate `guide` parameters show
+an error. Unknown/unpublished versions cannot start or fall back to another route.
+A fresh `/explore.html` asks for a walk link; when access is saved, it resumes the
+last saved version and pins the URL to that slug. A different valid entry offers a
+separate **RESUME PREVIOUS WALK** link; selecting a new version never migrates an old
+run into it. This is a single resume shortcut, not a guide catalogue.
+
+Resume reads the authenticated run first and takes title, stop count, content and
+phase from `run.guide`/server state. It verifies the run ID and expected immutable
+slug rather than combining an old run with new entry metadata. It does not depend
+on fetching metadata for a new default/version. No Start or GPS request is automatic.
+
+The production Vite build includes both index.html (legacy Mini App) and
 explore.html. Serve both files on the existing allowed frontend origin and keep
-the existing public HTTPS API configuration. No CORS policy or legacy API contract
-was changed. Hosting must serve explore.html rather than rewrite it to index.html.
+the existing public HTTPS API configuration. Hosting must serve explore.html
+rather than rewrite it to index.html; no CORS or legacy auth change is needed.
 
 ## Run credential and resume limits
 
 There is no guest account. Each run has a separate opaque bearer credential, stored
 as a SHA-256 hash on the backend. It cannot authorize multiplayer/admin endpoints.
-The frontend keeps access in the `ayloor-explore-demo-v1` localStorage record;
-clearing site data, a private-session close or losing the device loses access.
+The frontend stores one pending Start or run credential per version in
+`ayloor-explore:v1:guide:<slug>`. `ayloor-explore:v1:last-guide` is a navigation
+pointer only; it never authorizes a run. Clearing site data, a private-session close
+or losing the device loses access.
 No automatic expiry, account recovery, cross-device sync or offline queue is added.
-The demo requires network access. Treat this as web demo storage, not a solution for
+The flow requires network access. Treat this as web storage, not a solution for
 native secrets. JavaScript/XSS or same-origin scripts can read localStorage: keep
 this origin trusted and do not embed third-party scripts in the Explore entry.
+
+Old `ayloor-explore-demo-v1` storage is read only for a bare Resume entry or the
+explicit old demo link. A stored credential is resolved against the server to learn
+its original guide; an old pending Start is bound to `explore-demo-v1`. Migration
+copies access into the correct version slot without deleting the old key or
+replacing an existing scoped record. A new guide entry never consumes that key.
+Unreadable/mismatched saved access gives an error; it is not cleared or replaced by
+a new run. Keep the version URL to return to an older run after starting another.
 
 Before Start, the client persists a cryptographically random 256-bit secret retry
 key. The backend derives a domain-separated HMAC run credential using APP_SECRET_KEY;
@@ -126,7 +200,12 @@ is statistical, not a guaranteed error bound; thresholds need field calibration.
 
 ## Verification
 
-Use README/Makefile checks. Focused backend: `backend/tests/test_explore.py` and
+Use README/Makefile checks. Publication/CLI/migration tests:
+`backend/tests/test_explore_publication.py`; entry/storage unit tests:
+`miniapp/src/explore/session.test.ts`; real-API browser tests:
+`miniapp/e2e/explore-versions.spec.ts` (two versions, old demo/pending starts,
+unknown/draft/invalid entries, independent tabs, and 3-stop Finish at mobile widths).
+Focused backend: `backend/tests/test_explore.py` and
 `backend/tests/test_explore_arrival.py` (including 0004→0005 roundtrip); keep
 `test_field_test_migration.py` for legacy migration regression.
 Frontend tests: `miniapp/src/explore/api.test.ts` and `geolocation.test.ts`.
@@ -139,6 +218,9 @@ Playwright/mocked callbacks. It checks mobile widths, error states, no auto-prom
 late callbacks/HTTP responses, lost responses and independent Answer progression.
 This fixture is not installed by the application seed and is not a public guide.
 Do not run browser tests and pytest concurrently against that shared test database.
+If a previous backend test left extra FIELD TEST quests, reset fixtures through the
+standard guarded test before running the legacy browser suite, for example:
+`.venv/bin/pytest -c backend/pyproject.toml backend/tests/test_explore.py -q`.
 
 Migration 0004 only adds Explore tables. Downgrade removes those demo runs/content;
 it does not remove multiplayer data. Never downgrade a deployed DB with Explore
@@ -146,6 +228,15 @@ progress unless that deliberate data loss is acceptable. Migration 0005 adds onl
 nullable Explore fields, constraints and an FK; existing progress/auth/legacy data
 remain intact. Downgrading 0005 discards checkpoint configuration, directions and
 Arrival confirmation, but retains guide/run/answer/hint progress.
+
+Migration 0006 adds nullable `published_at` and immutability triggers. Existing guides
+were implicitly public, so they are grandfathered with `published_at = created_at`;
+UUIDs, stop content and runs remain unchanged. This is compatibility preservation,
+not retrospective validation of old content. New rows default unpublished. Deploy
+migration before the new backend, then use the publisher for new versions.
+Downgrading 0006 keeps content/progress but removes publication state and guards;
+old code treats all guide rows as public. Review any drafts before such a rollback.
+There is no unpublish/withdrawal or content-edit command in this slice.
 
 This slice does not claim launch readiness: there is no public abuse-rate policy,
 credential recovery/revocation UI, final field-reviewed content, native storage or
