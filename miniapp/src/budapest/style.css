@@ -56,6 +56,8 @@ a:focus-visible, button:focus-visible { outline: 3px solid var(--rust); outline-
 .identity > span { font-weight: 600; }
 .masthead a { display: flex; min-height: 44px; align-items: center; gap: .35rem; font-weight: 600; }
 
+.masthead-signup { color: var(--rust); }
+
 .landing-grid { display: grid; gap: 2rem; padding-block: clamp(1.75rem, 5vw, 4.75rem) 3rem; }
 .label { font-size: .81rem; font-weight: 600; letter-spacing: .11em; text-transform: uppercase; }
 
@@ -79,6 +81,7 @@ a:focus-visible, button:focus-visible { outline: 3px solid var(--rust); outline-
 .price { display: flex; flex-wrap: wrap; align-items: baseline; gap: .25rem .6rem; }
 .price strong { font: 800 2.3rem/.95 var(--display); }
 .price span { color: var(--muted); font-weight: 600; }
+.group-offer { max-width: 36ch; margin-top: .55rem; }
 .availability { max-width: 33ch; margin-top: .65rem; }
 
 .signup {
@@ -86,7 +89,9 @@ a:focus-visible, button:focus-visible { outline: 3px solid var(--rust); outline-
   justify-content: space-between;
   align-items: center;
   gap: 1.5rem;
-  min-height: 48px;
+  width: 100%;
+  min-height: 52px;
+  font-size: 1.125rem;
   margin-top: 1rem;
   padding: .55rem 1rem;
   background: var(--rust);
@@ -101,11 +106,12 @@ a:focus-visible, button:focus-visible { outline: 3px solid var(--rust); outline-
 .sample { min-width: 0; border: 1px solid var(--line); scroll-margin-top: 1rem; }
 
 figure { margin: 0; }
-figure img { display: block; width: 100%; height: auto; aspect-ratio: 1.5; object-fit: cover; object-position: center 23%; }
+figure img { display: block; width: 100%; height: auto; aspect-ratio: 1.5; object-fit: cover; object-position: center 86%; }
 figcaption { padding: .5rem .9rem; color: var(--muted); font-size: .875rem; }
 
 .puzzle { padding: .95rem clamp(.9rem, 3vw, 1.5rem) 1.15rem; border-top: 1px solid var(--line); }
 .puzzle h2 { margin: .35rem 0 .8rem; font: 800 clamp(1.7rem, 4vw, 2.4rem)/1.03 var(--display); }
+.clue { margin-bottom: .85rem; }
 .choices { display: flex; flex-wrap: wrap; gap: .5rem; }
 
 .choices button {
